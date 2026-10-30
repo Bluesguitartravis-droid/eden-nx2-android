@@ -38,6 +38,25 @@ jobs:
           sudo apt-get install -y -qq glslang-tools ccache
           glslangValidator --version | head -n1
 
+      - name: Dump sources for patch authoring
+        if: github.event_name == 'workflow_dispatch' && contains(github.ref, 'claude/')
+        shell: bash
+        run: |
+          cd upstream
+          emit() {
+            local body
+            body="$(cat | head -c 60000 | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | awk 'BEGIN{ORS="%0A"}{print}')"
+            [ -n "$body" ] && echo "::notice title=$1::$body"
+          }
+          ls src/core/arm/nce | emit nce-ls
+          for f in src/core/arm/nce/visitor_base.h src/core/arm/nce/interpreter_visitor.h; do
+            [ -f "$f" ] && emit "$f" < "$f"
+          done
+          head -n 40 src/dynarmic/src/dynarmic/frontend/A64/decoder/a64.inc | emit a64inc-head
+          grep -rnE "LDAPR_sz|AtomicMemOp|CompareAndSwap|PACAUT_reg|BRA_BLRA|STG_family|STGP|INST\(" src/dynarmic/src/dynarmic/frontend/A64/translate/impl/impl.h | head -n 60 | emit impl-h
+          grep -rn "a64.inc\|VisitorBase" src/core/arm/nce/*.cpp src/core/arm/nce/*.h | head -n 40 | emit uses
+          git log -5 --oneline -- src/dynarmic/src/dynarmic/frontend/A64/decoder/a64.inc | emit a64inc-log
+
       - name: Set up Java
         uses: actions/setup-java@v5
         with:

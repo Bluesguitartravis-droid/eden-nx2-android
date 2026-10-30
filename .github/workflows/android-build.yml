@@ -88,17 +88,17 @@ jobs:
           set -o pipefail
           TASKS="$(cat "$GITHUB_WORKSPACE/gradle-tasks.txt")"
 
-          if grep -q "^assembleStandardRelease" <<< "$TASKS"; then
-            BUILD_TASK=assembleStandardRelease
-          elif grep -q "^assembleRelease" <<< "$TASKS"; then
-            BUILD_TASK=assembleRelease
-          elif grep -q "^assembleStandardDebug" <<< "$TASKS"; then
-            BUILD_TASK=assembleStandardDebug
-          elif grep -q "^assembleDebug" <<< "$TASKS"; then
-            BUILD_TASK=assembleDebug
+          if grep -q "^app:assembleMainlineRelease" <<< "$TASKS"; then
+            BUILD_TASK=app:assembleMainlineRelease
+          elif grep -q "^app:assembleMainlineDebug" <<< "$TASKS"; then
+            BUILD_TASK=app:assembleMainlineDebug
+          elif grep -q "^app:assembleRelease" <<< "$TASKS"; then
+            BUILD_TASK=app:assembleRelease
+          elif grep -q "^app:assembleDebug" <<< "$TASKS"; then
+            BUILD_TASK=app:assembleDebug
           else
             echo "Could not identify an Android assemble task."
-            grep -E "^assemble" "$GITHUB_WORKSPACE/gradle-tasks.txt" | head -n 120 || true
+            grep -E "assemble(Mainline|Release|Debug)" "$GITHUB_WORKSPACE/gradle-tasks.txt" | head -n 120 || true
             exit 2
           fi
 

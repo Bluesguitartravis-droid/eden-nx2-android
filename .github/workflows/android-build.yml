@@ -106,6 +106,25 @@ jobs:
           echo "BUILD_TASK=$BUILD_TASK" >> "$GITHUB_ENV"
           ./gradlew "$BUILD_TASK" --stacktrace --no-daemon 2>&1 | tee "$GITHUB_WORKSPACE/android-build.log"
 
+      - name: Surface build errors as annotations
+        if: failure()
+        shell: bash
+        run: |
+          # Annotations are readable through the GitHub API even when log/artifact
+          # downloads are not, so mirror the key failure lines here.
+          LOG="$GITHUB_WORKSPACE/android-build.log"
+          [ -f "$LOG" ] || { echo "::error title=no-build-log::android-build.log was not produced"; exit 0; }
+          emit() {
+            # $1 = title, stdin = text; GitHub annotations need %, CR, LF escaped
+            local body
+            body="$(cat | head -c 60000 | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | awk 'BEGIN{ORS="%0A"}{print}')"
+            [ -n "$body" ] && echo "::error title=$1::$body"
+          }
+          grep -nE "error:|Error:|FAILED|What went wrong|CMake Error|undefined reference|fatal error|> Task .* FAILED|Could not|not found" "$LOG" | head -n 150 | emit build-errors
+          grep -nA40 "What went wrong" "$LOG" | head -n 120 | emit what-went-wrong
+          grep -nB5 -A25 "CMake Error" "$LOG" | head -n 150 | emit cmake-error
+          tail -n 120 "$LOG" | emit log-tail
+
       - name: Collect build metadata
         if: always()
         shell: bash

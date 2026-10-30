@@ -1,0 +1,142 @@
+name: Build NX2 Android
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - ".github/workflows/android-build.yml"
+      - "patches/**"
+      - "scripts/**"
+      - "README.md"
+
+permissions:
+  contents: read
+
+jobs:
+  android-arm64:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout build harness
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Clone Eden NX2
+        shell: bash
+        run: |
+          git clone --recursive --branch eden-nx2 --single-branch             https://git.eden-emu.dev/Takoroka/eden-nx2.git upstream
+          git -C upstream submodule update --init --recursive
+          echo "NX2_COMMIT=$(git -C upstream rev-parse HEAD)" >> "$GITHUB_ENV"
+          git -C upstream log -1 --oneline
+
+      - name: Apply local Android patches
+        shell: bash
+        run: |
+          shopt -s nullglob
+          patches=(patches/*.patch)
+          if (( ${#patches[@]} )); then
+            for patch in "${patches[@]}"; do
+              echo "Applying $patch"
+              git -C upstream apply "../$patch"
+            done
+          else
+            echo "No local patches yet."
+          fi
+
+      - name: Detect Android build requirements
+        id: android_req
+        shell: bash
+        run: |
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          NDK_VERSION="$(grep -RhoE 'ndkVersion[[:space:]]*=[[:space:]]*"[^"]+"' upstream/src/android 2>/dev/null | head -n1 | sed -E 's/.*"([^"]+)".*/\1/' || true)"
+          if [ -n "$NDK_VERSION" ]; then
+            echo "Detected NDK: $NDK_VERSION"
+            echo "ndk_version=$NDK_VERSION" >> "$GITHUB_OUTPUT"
+          else
+            echo "No explicit NDK version detected; Gradle/SDK defaults will be used."
+            echo "ndk_version=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install requested Android NDK
+        if: steps.android_req.outputs.ndk_version != ''
+        shell: bash
+        run: |
+          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"             "ndk;${{ steps.android_req.outputs.ndk_version }}"
+
+      - name: Prepare Gradle
+        shell: bash
+        working-directory: upstream/src/android
+        run: |
+          chmod +x gradlew
+          ./gradlew --version
+          ./gradlew tasks --all > "$GITHUB_WORKSPACE/gradle-tasks.txt"
+          grep -E "assemble.*(Standard|Release|Debug)" "$GITHUB_WORKSPACE/gradle-tasks.txt" | head -n 80 || true
+
+      - name: Build standard ARM64 APK
+        shell: bash
+        working-directory: upstream/src/android
+        run: |
+          set -o pipefail
+          TASKS="$(cat "$GITHUB_WORKSPACE/gradle-tasks.txt")"
+
+          if grep -q "^assembleStandardRelease" <<< "$TASKS"; then
+            BUILD_TASK=assembleStandardRelease
+          elif grep -q "^assembleRelease" <<< "$TASKS"; then
+            BUILD_TASK=assembleRelease
+          elif grep -q "^assembleStandardDebug" <<< "$TASKS"; then
+            BUILD_TASK=assembleStandardDebug
+          elif grep -q "^assembleDebug" <<< "$TASKS"; then
+            BUILD_TASK=assembleDebug
+          else
+            echo "Could not identify an Android assemble task."
+            grep -E "^assemble" "$GITHUB_WORKSPACE/gradle-tasks.txt" | head -n 120 || true
+            exit 2
+          fi
+
+          echo "Using Gradle task: $BUILD_TASK"
+          echo "BUILD_TASK=$BUILD_TASK" >> "$GITHUB_ENV"
+          ./gradlew "$BUILD_TASK" --stacktrace --no-daemon 2>&1 | tee "$GITHUB_WORKSPACE/android-build.log"
+
+      - name: Collect build metadata
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "NX2 source commit: ${NX2_COMMIT:-unknown}"
+            echo "Gradle task: ${BUILD_TASK:-not-started}"
+            echo "Runner: $RUNNER_OS / $RUNNER_ARCH"
+            echo
+            echo "APKs:"
+            find upstream/src/android -type f -name "*.apk" -print 2>/dev/null || true
+          } > build-info.txt
+
+      - name: Upload APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eden-nx2-android-arm64-${{ github.run_number }}
+          path: |
+            upstream/src/android/**/*.apk
+            build-info.txt
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eden-nx2-build-diagnostics-${{ github.run_number }}
+          path: |
+            android-build.log
+            gradle-tasks.txt
+            build-info.txt
+          if-no-files-found: ignore
+          retention-days: 14

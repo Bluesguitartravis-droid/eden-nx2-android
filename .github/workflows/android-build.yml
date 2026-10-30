@@ -30,6 +30,14 @@ jobs:
           echo "NX2_COMMIT=$(git -C upstream rev-parse HEAD)" >> "$GITHUB_ENV"
           git -C upstream log -1 --oneline
 
+      - name: Install host build tools
+        shell: bash
+        run: |
+          # glslangValidator compiles Eden's host shaders at configure time.
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq glslang-tools ccache
+          glslangValidator --version | head -n1
+
       - name: Set up Java
         uses: actions/setup-java@v5
         with:

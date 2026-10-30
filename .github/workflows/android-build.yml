@@ -22,13 +22,6 @@ jobs:
       - name: Checkout build harness
         uses: actions/checkout@v4
 
-      - name: Set up Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-          cache: gradle
-
       - name: Clone Eden NX2
         shell: bash
         run: |
@@ -36,6 +29,14 @@ jobs:
           git -C upstream submodule update --init --recursive
           echo "NX2_COMMIT=$(git -C upstream rev-parse HEAD)" >> "$GITHUB_ENV"
           git -C upstream log -1 --oneline
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+          cache-dependency-path: upstream/src/android/**/*.gradle*
 
       - name: Apply local Android patches
         shell: bash

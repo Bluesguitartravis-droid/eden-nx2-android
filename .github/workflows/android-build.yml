@@ -70,7 +70,7 @@ jobs:
         if: steps.android_req.outputs.ndk_version != ''
         shell: bash
         run: |
-          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"             "ndk;${{ steps.android_req.outputs.ndk_version }}"
+          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "ndk;${{ steps.android_req.outputs.ndk_version }}"
 
       - name: Prepare Gradle
         shell: bash

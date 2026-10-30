@@ -2,6 +2,15 @@ name: Build NX2 Android
 
 on:
   workflow_dispatch:
+    inputs:
+      inspect:
+        description: "Debug: shell commands run in the upstream tree; output is published as annotations"
+        required: false
+        default: ""
+      skip_build:
+        description: "Debug: skip the APK build (only run the inspect job)"
+        type: boolean
+        default: false
   push:
     branches: [ main ]
     paths:
@@ -14,7 +23,28 @@ permissions:
   contents: read
 
 jobs:
+  inspect-upstream:
+    if: github.event_name == 'workflow_dispatch' && inputs.inspect != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Run inspection commands
+        shell: bash
+        env:
+          INSPECT: ${{ inputs.inspect }}
+        run: |
+          git clone --depth 1 --branch eden-nx2 --single-branch https://git.eden-emu.dev/Takoroka/eden-nx2.git upstream
+          cd upstream
+          # Annotations are readable through the API when logs are not; chunk output into them.
+          bash -c "$INSPECT" > ../inspect.txt 2>&1 || true
+          split -b 60000 -d ../inspect.txt ../chunk-
+          for c in ../chunk-*; do
+            body="$(sed -e 's/%/%25/g' -e 's/\r/%0D/g' "$c" | awk 'BEGIN{ORS="%0A"}{print}')"
+            echo "::notice title=inspect-$(basename "$c")::$body"
+          done
+
   android-arm64:
+    if: github.event_name != 'workflow_dispatch' || !inputs.skip_build
     runs-on: ubuntu-latest
     timeout-minutes: 90
 
@@ -37,25 +67,6 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq glslang-tools ccache
           glslangValidator --version | head -n1
-
-      - name: Dump sources for patch authoring
-        if: github.event_name == 'workflow_dispatch' && contains(github.ref, 'claude/')
-        shell: bash
-        run: |
-          cd upstream
-          emit() {
-            local body
-            body="$(cat | head -c 60000 | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | awk 'BEGIN{ORS="%0A"}{print}')"
-            [ -n "$body" ] && echo "::notice title=$1::$body"
-          }
-          ls src/core/arm/nce | emit nce-ls
-          for f in src/core/arm/nce/visitor_base.h src/core/arm/nce/interpreter_visitor.h; do
-            [ -f "$f" ] && emit "$f" < "$f"
-          done
-          head -n 40 src/dynarmic/src/dynarmic/frontend/A64/decoder/a64.inc | emit a64inc-head
-          grep -rnE "LDAPR_sz|AtomicMemOp|CompareAndSwap|PACAUT_reg|BRA_BLRA|STG_family|STGP|INST\(" src/dynarmic/src/dynarmic/frontend/A64/translate/impl/impl.h | head -n 60 | emit impl-h
-          grep -rn "a64.inc\|VisitorBase" src/core/arm/nce/*.cpp src/core/arm/nce/*.h | head -n 40 | emit uses
-          git log -5 --oneline -- src/dynarmic/src/dynarmic/frontend/A64/decoder/a64.inc | emit a64inc-log
 
       - name: Set up Java
         uses: actions/setup-java@v5

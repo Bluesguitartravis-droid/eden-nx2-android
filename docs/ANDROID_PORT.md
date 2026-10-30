@@ -15,11 +15,19 @@ Features to preserve include:
 - shader-cache management
 - Android diagnostic logging
 
+## Compatibility target
+
+This fork is intended to preserve normal Nintendo Switch compatibility from Eden while adding the experimental NX2 / Switch 2 work.
+
+- Existing Switch support is a regression gate: NX2 changes should not break normal Switch titles.
+- Switch 2 support is experimental and will be layered into the same Android build.
+- Game files, keys, firmware, and other user content are not bundled by this project.
+
 ## First milestone
 
-The first milestone is an installable arm64-v8a APK that reaches Eden's normal Android UI on the Odin 3 Ultra and preserves the custom-driver selector.
+The first milestone is an installable arm64-v8a APK that reaches Eden's normal Android UI on the Odin 3 Ultra, preserves the custom-driver selector, and retains the existing Switch code path.
 
-Runtime NX2 compatibility comes after the Android build baseline is established.
+Runtime NX2 / Switch 2 compatibility comes after the Android build baseline is established.
 
 ## Testing
 

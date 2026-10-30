@@ -2,6 +2,15 @@ name: Build NX2 Android
 
 on:
   workflow_dispatch:
+    inputs:
+      inspect:
+        description: "Debug: shell commands run in the upstream tree; output is published as annotations"
+        required: false
+        default: ""
+      skip_build:
+        description: "Debug: skip the APK build (only run the inspect job)"
+        type: boolean
+        default: false
   push:
     branches: [ main ]
     paths:
@@ -14,7 +23,28 @@ permissions:
   contents: read
 
 jobs:
+  inspect-upstream:
+    if: github.event_name == 'workflow_dispatch' && inputs.inspect != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Run inspection commands
+        shell: bash
+        env:
+          INSPECT: ${{ inputs.inspect }}
+        run: |
+          git clone --depth 1 --branch eden-nx2 --single-branch https://git.eden-emu.dev/Takoroka/eden-nx2.git upstream
+          cd upstream
+          # Annotations are readable through the API when logs are not; chunk output into them.
+          bash -c "$INSPECT" > ../inspect.txt 2>&1 || true
+          split -b 60000 -d ../inspect.txt ../chunk-
+          for c in ../chunk-*; do
+            body="$(sed -e 's/%/%25/g' -e 's/\r/%0D/g' "$c" | awk 'BEGIN{ORS="%0A"}{print}')"
+            echo "::notice title=inspect-$(basename "$c")::$body"
+          done
+
   android-arm64:
+    if: github.event_name != 'workflow_dispatch' || !inputs.skip_build
     runs-on: ubuntu-latest
     timeout-minutes: 90
 
@@ -29,6 +59,14 @@ jobs:
           git -C upstream submodule update --init --recursive
           echo "NX2_COMMIT=$(git -C upstream rev-parse HEAD)" >> "$GITHUB_ENV"
           git -C upstream log -1 --oneline
+
+      - name: Install host build tools
+        shell: bash
+        run: |
+          # glslangValidator compiles Eden's host shaders at configure time.
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq glslang-tools ccache
+          glslangValidator --version | head -n1
 
       - name: Set up Java
         uses: actions/setup-java@v5
@@ -105,6 +143,25 @@ jobs:
           echo "Using Gradle task: $BUILD_TASK"
           echo "BUILD_TASK=$BUILD_TASK" >> "$GITHUB_ENV"
           ./gradlew "$BUILD_TASK" --stacktrace --no-daemon 2>&1 | tee "$GITHUB_WORKSPACE/android-build.log"
+
+      - name: Surface build errors as annotations
+        if: failure()
+        shell: bash
+        run: |
+          # Annotations are readable through the GitHub API even when log/artifact
+          # downloads are not, so mirror the key failure lines here.
+          LOG="$GITHUB_WORKSPACE/android-build.log"
+          [ -f "$LOG" ] || { echo "::error title=no-build-log::android-build.log was not produced"; exit 0; }
+          emit() {
+            # $1 = title, stdin = text; GitHub annotations need %, CR, LF escaped
+            local body
+            body="$(cat | head -c 60000 | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | awk 'BEGIN{ORS="%0A"}{print}')"
+            [ -n "$body" ] && echo "::error title=$1::$body"
+          }
+          grep -nE "error:|Error:|FAILED|What went wrong|CMake Error|undefined reference|fatal error|> Task .* FAILED|Could not|not found" "$LOG" | head -n 150 | emit build-errors
+          grep -nA40 "What went wrong" "$LOG" | head -n 120 | emit what-went-wrong
+          grep -nB5 -A25 "CMake Error" "$LOG" | head -n 150 | emit cmake-error
+          tail -n 120 "$LOG" | emit log-tail
 
       - name: Collect build metadata
         if: always()

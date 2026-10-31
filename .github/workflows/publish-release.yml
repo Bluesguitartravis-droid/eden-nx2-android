@@ -1,0 +1,91 @@
+name: Publish APK release
+
+# Attaches the APK from a successful "Build NX2 Android" run on main to a
+# GitHub release, so it can be downloaded without signing in and without
+# the 14-day artifact expiry.
+
+on:
+  workflow_run:
+    workflows: [ "Build NX2 Android" ]
+    types: [ completed ]
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "ID of a successful Build NX2 Android run to publish"
+        required: true
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event != 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Resolve build run
+        id: run
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_RUN: ${{ inputs.run_id }}
+          EVENT_RUN: ${{ github.event.workflow_run.id }}
+        run: |
+          RUN_ID="${INPUT_RUN:-$EVENT_RUN}"
+          info="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID")"
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          echo "run_number=$(jq -r .run_number <<< "$info")" >> "$GITHUB_OUTPUT"
+          echo "sha=$(jq -r .head_sha <<< "$info")" >> "$GITHUB_OUTPUT"
+          echo "conclusion=$(jq -r .conclusion <<< "$info")" >> "$GITHUB_OUTPUT"
+
+      - name: Require a successful build
+        if: steps.run.outputs.conclusion != 'success'
+        run: |
+          echo "Run ${{ steps.run.outputs.run_id }} concluded '${{ steps.run.outputs.conclusion }}'; nothing to publish."
+          exit 1
+
+      - name: Download APK artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: eden-nx2-android-arm64-${{ steps.run.outputs.run_number }}
+          path: artifact
+          run-id: ${{ steps.run.outputs.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Publish release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ steps.run.outputs.run_id }}
+          RUN_NUMBER: ${{ steps.run.outputs.run_number }}
+          SHA: ${{ steps.run.outputs.sha }}
+        run: |
+          mapfile -t apks < <(find artifact -type f -name '*.apk')
+          if (( ${#apks[@]} == 0 )); then echo "No APK in artifact"; exit 1; fi
+
+          mkdir -p dist
+          for apk in "${apks[@]}"; do
+            base="$(basename "$apk" .apk)"
+            cp "$apk" "dist/eden-nx2-${base#app-}-arm64-build${RUN_NUMBER}.apk"
+          done
+          [ -f artifact/build-info.txt ] && cp artifact/build-info.txt dist/
+          (cd dist && sha256sum *.apk > SHA256SUMS.txt)
+          ls -l dist
+
+          TAG="build-${RUN_NUMBER}"
+          NOTES="$(printf '%s\n' \
+            "Experimental Eden NX2 Android build (arm64-v8a) from [build run ${RUN_ID}](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}), commit ${SHA:0:7}." \
+            "" \
+            "Unofficial community build. No keys, firmware or games are included." \
+            "" \
+            '```' "$(cat dist/build-info.txt 2>/dev/null)" '```')"
+
+          gh release delete "$TAG" --cleanup-tag --yes -R "$GITHUB_REPOSITORY" 2>/dev/null || true
+          gh release create "$TAG" dist/* -R "$GITHUB_REPOSITORY" \
+            --target "$SHA" \
+            --title "Eden NX2 Android build ${RUN_NUMBER}" \
+            --notes "$NOTES" \
+            --latest

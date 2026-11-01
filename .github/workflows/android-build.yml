@@ -12,7 +12,7 @@ on:
         type: boolean
         default: false
   push:
-    branches: [ main ]
+    branches: [ main, feature/eglantine-updater ]
     paths:
       - ".github/workflows/android-build.yml"
       - "patches/**"
@@ -89,6 +89,20 @@ jobs:
           else
             echo "No local patches yet."
           fi
+
+      - name: Apply selected Eglantine NX2 fixes
+        shell: bash
+        run: |
+          chmod +x scripts/apply-eglantine-fixes.sh
+          scripts/apply-eglantine-fixes.sh upstream
+
+      - name: Configure in-app updater for this fork
+        shell: bash
+        env:
+          NX2_ANDROID_BUILD_TAG: build-${{ github.run_number }}
+        run: |
+          python3 scripts/configure-updater.py upstream "$NX2_ANDROID_BUILD_TAG"
+          grep -n -A18 "NX2 Android fork update feed" upstream/CMakeModules/GenerateSCMRev.cmake
 
       - name: Detect Android build requirements
         id: android_req

@@ -16,15 +16,13 @@ if marker not in text:
 
 block = f'''# NX2 Android fork update feed. GitHub Releases provide a stable APK URL and metadata.
 # Android will still require the user to approve the package-install confirmation.
-if(DEFINED ENV{{NX2_ANDROID_BUILD_TAG}} AND NOT "$ENV{{NX2_ANDROID_BUILD_TAG}}" STREQUAL "")
-    set(BUILD_VERSION "$ENV{{NX2_ANDROID_BUILD_TAG}}")
-    set(GIT_DESC "${{BUILD_VERSION}}")
-    set(BUILD_AUTO_UPDATE_WEBSITE "https://github.com")
-    set(BUILD_AUTO_UPDATE_API "api.github.com")
-    set(BUILD_AUTO_UPDATE_API_PATH "/repos/Bluesguitartravis-droid/eden-nx2-android/releases/latest")
-    set(BUILD_AUTO_UPDATE_REPO "Bluesguitartravis-droid/eden-nx2-android")
-    set(REPO_NAME "Eden NX2 Android")
-endif()
+set(BUILD_VERSION "{build_tag}")
+set(GIT_DESC "${{BUILD_VERSION}}")
+set(BUILD_AUTO_UPDATE_WEBSITE "https://github.com")
+set(BUILD_AUTO_UPDATE_API "api.github.com")
+set(BUILD_AUTO_UPDATE_API_PATH "/repos/Bluesguitartravis-droid/eden-nx2-android/releases/latest")
+set(BUILD_AUTO_UPDATE_REPO "Bluesguitartravis-droid/eden-nx2-android")
+set(REPO_NAME "Eden NX2 Android")
 
 '''
 if "NX2 Android fork update feed" not in text:

@@ -31,4 +31,47 @@ if "NX2 Android fork update feed" not in text:
     text = text.replace(marker, block + marker)
 
 path.write_text(text)
-print(f"Configured updater feed for {build_tag}: {path}")
+
+checker = root / "src" / "frontend_common" / "update_checker.cpp"
+checker_text = checker.read_text()
+if "#include <charconv>" not in checker_text:
+    checker_text = checker_text.replace("#include <fmt/format.h>", "#include <charconv>\n#include <fmt/format.h>")
+
+old_compare = """    if (tag != build)
+        return latest;
+
+    return std::nullopt;
+"""
+new_compare = """    // NX2 Android releases use monotonically increasing build-N tags. Do not
+    // offer a downgrade when a locally installed/test build is newer than the
+    // latest published release.
+    const auto parse_build_number = [](std::string_view value) -> std::optional<u64> {
+        constexpr std::string_view prefix{"build-"};
+        if (!value.starts_with(prefix)) {
+            return std::nullopt;
+        }
+        u64 number{};
+        const auto digits = value.substr(prefix.size());
+        const auto [ptr, ec] =
+            std::from_chars(digits.data(), digits.data() + digits.size(), number);
+        if (ec != std::errc{} || ptr != digits.data() + digits.size()) {
+            return std::nullopt;
+        }
+        return number;
+    };
+
+    const auto latest_build = parse_build_number(tag);
+    const auto current_build = parse_build_number(build);
+    if (latest_build && current_build) {
+        return *latest_build > *current_build ? latest : std::nullopt;
+    }
+
+    if (tag != build)
+        return latest;
+
+    return std::nullopt;
+"""
+if old_compare not in checker_text:
+    raise SystemExit(f"Could not find update comparison block in {checker}")
+checker.write_text(checker_text.replace(old_compare, new_compare))
+print(f"Configured updater feed/version comparison for {build_tag}")

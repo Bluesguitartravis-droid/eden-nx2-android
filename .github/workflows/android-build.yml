@@ -17,7 +17,8 @@ on:
       - ".github/workflows/android-build.yml"
       - "patches/**"
       - "scripts/**"
-      - "README.md"\n      - "docs/**"
+      - "README.md"
+      - "docs/**"
 
 permissions:
   contents: read

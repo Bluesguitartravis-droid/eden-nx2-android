@@ -32,6 +32,19 @@ if "NX2 Android fork update feed" not in text:
 
 path.write_text(text)
 
+# Eden normally enables its Android update checker only for "nightly" builds.
+# Enabling the nightly Gradle flavor would also change applicationId, preventing
+# an in-place update of the build the Odin is already using. Enable only the
+# CMake feature instead, preserving dev.eden.eden_emulator.
+gradle = root / "src" / "android" / "app" / "build.gradle.kts"
+gradle_text = gradle.read_text()
+cmake_anchor = '                        "-DENABLE_WEB_SERVICE=1", // Enable web service\n'
+cmake_update = cmake_anchor + '                        "-DENABLE_UPDATE_CHECKER=ON", // NX2 Android GitHub releases\n'
+if "-DENABLE_UPDATE_CHECKER=ON\", // NX2 Android GitHub releases" not in gradle_text:
+    if cmake_anchor not in gradle_text:
+        raise SystemExit(f"Could not find Android CMake argument block in {gradle}")
+    gradle.write_text(gradle_text.replace(cmake_anchor, cmake_update, 1))
+
 checker = root / "src" / "frontend_common" / "update_checker.cpp"
 checker_text = checker.read_text()
 if "#include <charconv>" not in checker_text:

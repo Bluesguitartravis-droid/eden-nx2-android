@@ -74,4 +74,30 @@ new_compare = """    // NX2 Android releases use monotonically increasing build-
 if old_compare not in checker_text:
     raise SystemExit(f"Could not find update comparison block in {checker}")
 checker.write_text(checker_text.replace(old_compare, new_compare))
+
+net = root / "src" / "common" / "net" / "net.cpp"
+net_text = net.read_text()
+request_block = """        httplib::Request request{
+            .method = "GET",
+            .path = path,
+        };
+"""
+request_with_headers = """        httplib::Request request{
+            .method = "GET",
+            .path = path,
+        };
+        // GitHub's REST API requires an identifying User-Agent. These headers are
+        // harmless for Eden's other update endpoints and make our GitHub release
+        // feed deterministic instead of depending on httplib defaults.
+        request.headers.emplace("User-Agent", "Eden-NX2-Android");
+        if (url.find("api.github.com") != std::string::npos) {
+            request.headers.emplace("Accept", "application/vnd.github+json");
+            request.headers.emplace("X-GitHub-Api-Version", "2022-11-28");
+        }
+"""
+if request_with_headers not in net_text:
+    if request_block not in net_text:
+        raise SystemExit(f"Could not find HTTP request block in {net}")
+    net.write_text(net_text.replace(request_block, request_with_headers))
+
 print(f"Configured updater feed/version comparison for {build_tag}")

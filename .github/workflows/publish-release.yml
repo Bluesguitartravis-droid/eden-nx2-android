@@ -69,7 +69,8 @@ jobs:
           mkdir -p dist
           for apk in "${apks[@]}"; do
             base="$(basename "$apk" .apk)"
-            cp "$apk" "dist/eden-nx2-${base#app-}-arm64-build${RUN_NUMBER}.apk"
+            # Eden's Android updater selects ARM64 mainline assets by the "standard.apk" suffix.
+            cp "$apk" "dist/Eden-NX2-Android-build${RUN_NUMBER}-standard.apk"
           done
           [ -f artifact/build-info.txt ] && cp artifact/build-info.txt dist/
           (cd dist && sha256sum *.apk > SHA256SUMS.txt)

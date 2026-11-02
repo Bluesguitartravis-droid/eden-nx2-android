@@ -35,6 +35,15 @@ jobs:
             "build-tools;36.0.0" \
             "ndk;27.2.12479018"
 
+      - name: Pin LZ4 reference decoder
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git clone --filter=blob:none --branch v1.10.0 --depth 1 \
+            https://github.com/lz4/lz4.git third_party/lz4
+          test "$(git -C third_party/lz4 rev-parse HEAD)" = \
+            "ebb370ca83af193212df4dcbadcc5d87bc0de2f0"
+
       - name: Compile native Stage 1B analyzer
         shell: bash
         run: |
@@ -43,7 +52,9 @@ jobs:
           CC="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang"
           "$CC" -shared -fPIC -O2 -ffixed-x18 \
             -Wl,-z,max-page-size=16384 \
+            -I third_party/lz4/lib \
             native_track/stage1b/native/stage1b_analyzer.c \
+            third_party/lz4/lib/lz4.c \
             -o libstage1b.so
           file libstage1b.so
 

@@ -10,7 +10,7 @@
   register, so the host must swap it on every guest/host transition (or rewrite the reads).
 - This build ID differs from nxnative's v458752 profile (main e25c90c1c136638885659fd55bf8a03b).
 
-## Pokopia? (0400a3a01ee4c000), main 28684035 bytes — BLOCKED
+## Title 0400a3a01ee4c000 (folder picked by mistake; not the intended test), main 28684035 bytes — BLOCKED
 
     FAIL decompress_text: LZ4 output=0 expected=40110032
     FAIL decompress_ro: LZ4 output=0 expected=11274060

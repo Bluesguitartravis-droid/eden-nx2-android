@@ -49,6 +49,7 @@
 #define REPORT_CAP 131072
 #define STUB_BYTES (MAX_IMPORTS * 8)
 #define GUEST_STACK_SIZE (2u << 20)
+#define NX2_REGION_SIZE (8ull << 30)
 
 enum {
     TR_TPIDR_R = 0x1000,
@@ -115,6 +116,7 @@ typedef struct {
     uint64_t pc;
     uint64_t fault;
     uint32_t insn;
+    uint64_t regs[8];
 } StopEvent;
 
 static Module g_mod[MAX_MODULES];
@@ -129,6 +131,10 @@ static uint8_t *g_guest_tls;
 static uint8_t *g_guest_tlr;
 static uint8_t *g_guest_stack;
 static void *g_guest_stack_top;
+static uint8_t *g_nx2_region;
+static size_t g_nx2_region_size;
+static _Alignas(0x1000) uint8_t g_user_exception_ctx[0x1000];
+static volatile sig_atomic_t g_getinfo_hits[64];
 
 static sigjmp_buf g_jmp;
 static volatile sig_atomic_t g_guest_active;
@@ -800,6 +806,85 @@ static uint64_t switch2_counter(void) {
     return (uint64_t)v;
 }
 
+static int emulate_get_info(ucontext_t *uc) {
+#if defined(__aarch64__)
+    uint64_t id = uc->uc_mcontext.regs[1];
+    uint64_t subid = uc->uc_mcontext.regs[3];
+    uint64_t value = 0;
+    int handled = 1;
+
+    if (id < 64) g_getinfo_hits[id]++;
+
+    switch (id) {
+    case 0:   // CoreMask: this title's NPDM declares cores 0..5.
+        value = 0x3f;
+        break;
+    case 8:   // DebuggerAttached
+        value = 0;
+        break;
+    case 11: { // RandomEntropy
+        static const uint64_t entropy[4] = {
+            0x4e58325354473143ULL,
+            0x4e58325354473243ULL,
+            0x4e58325354473343ULL,
+            0x4e58325354473443ULL,
+        };
+        if (subid < 4) value = entropy[subid];
+        else handled = 0;
+        break;
+    }
+    case 18:  // ProgramId
+        value = EXPECT_TITLE_ID;
+        break;
+    case 19:  // InitialProcessIdRange
+        if (subid == 0) value = 0;
+        else if (subid == 1) value = 64;
+        else handled = 0;
+        break;
+    case 20:  // UserExceptionContextAddress
+        value = (uint64_t)(uintptr_t)g_user_exception_ctx;
+        break;
+    case 23:  // IsApplication
+        value = 1;
+        break;
+    case 24:  // FreeThreadCount: conservative application limit before guest threads exist.
+        value = 96;
+        break;
+    case 28:  // AliasRegionExtraSize
+        value = 0;
+        break;
+    case 29:  // Switch 2 VAMM/NX2 region address
+        if (g_nx2_region) value = (uint64_t)(uintptr_t)g_nx2_region;
+        else handled = 0;
+        break;
+    case 30:  // Switch 2 VAMM/NX2 region size
+        if (g_nx2_region) value = g_nx2_region_size;
+        else handled = 0;
+        break;
+    case 31:  // Switch 2 remote-memory size (not backed yet)
+    case 32:  // Switch 2 remote-memory used
+        value = 0;
+        break;
+    case 33:  // Switch 2 VAMM page granule
+        value = 0x1000;
+        break;
+    default:
+        handled = 0;
+        break;
+    }
+
+    if (!handled) return 0;
+
+    // Horizon GetInfo ABI: x0 = ResultSuccess, x1 = returned value.
+    uc->uc_mcontext.regs[0] = 0;
+    uc->uc_mcontext.regs[1] = value;
+    return 1;
+#else
+    (void)uc;
+    return 0;
+#endif
+}
+
 static Module *module_for_pc(uint64_t pc, uint64_t *off) {
     for (int i = 0; i < g_nmod; ++i) {
         Module *m = &g_mod[i];
@@ -897,7 +982,35 @@ static void guest_signal_handler(int sig, siginfo_t *si, void *ctx) {
         return;
     }
     if ((imm & 0xf000u) == TR_SVC) {
-        stop_now(1, sig, imm & 0x0fffu, trap_pc, 0, insn);
+        unsigned svc = imm & 0x0fffu;
+
+        for (int i = 0; i < 8; ++i) g_stop.regs[i] = uc->uc_mcontext.regs[i];
+
+        if (svc == 0x1e) { // GetSystemTick
+            uc->uc_mcontext.regs[0] = 0;
+            uc->uc_mcontext.regs[1] = switch2_counter();
+            uc->uc_mcontext.pc = resume;
+            return;
+        }
+        if (svc == 0x27) { // OutputDebugString: no-op in the headless harness.
+            uc->uc_mcontext.regs[0] = 0;
+            uc->uc_mcontext.pc = resume;
+            return;
+        }
+        if (svc == 0x29) { // GetInfo
+            if (emulate_get_info(uc)) {
+                uc->uc_mcontext.pc = resume;
+                return;
+            }
+            stop_now(5, sig, (int)uc->uc_mcontext.regs[1], trap_pc, 0, insn);
+        }
+        if (svc == 0x2a || svc == 0x2b) { // cache maintenance
+            uc->uc_mcontext.regs[0] = 0;
+            uc->uc_mcontext.pc = resume;
+            return;
+        }
+
+        stop_now(1, sig, (int)svc, trap_pc, 0, insn);
     }
     if ((imm & 0x8000u) == TR_IMPORT) {
         stop_now(2, sig, imm & 0x7fffu, trap_pc, 0, insn);
@@ -966,6 +1079,20 @@ static void report_stop(Out *o) {
     switch (g_stop.type) {
     case 1:
         add(o, "FIRST_DEPENDENCY=svc 0x%x\n", g_stop.arg);
+        add(o,
+            "svc_regs x0=0x%" PRIx64 " x1=0x%" PRIx64
+            " x2=0x%" PRIx64 " x3=0x%" PRIx64
+            " x4=0x%" PRIx64 " x5=0x%" PRIx64
+            " x6=0x%" PRIx64 " x7=0x%" PRIx64 "\n",
+            g_stop.regs[0], g_stop.regs[1], g_stop.regs[2], g_stop.regs[3],
+            g_stop.regs[4], g_stop.regs[5], g_stop.regs[6], g_stop.regs[7]);
+        break;
+    case 5:
+        add(o, "FIRST_DEPENDENCY=GetInfo id=%d\n", g_stop.arg);
+        add(o,
+            "getinfo_regs x0=0x%" PRIx64 " x1(id)=0x%" PRIx64
+            " x2(handle)=0x%" PRIx64 " x3(subid)=0x%" PRIx64 "\n",
+            g_stop.regs[0], g_stop.regs[1], g_stop.regs[2], g_stop.regs[3]);
         break;
     case 2:
         if (g_stop.arg >= 0 && (unsigned)g_stop.arg < g_nimport) {
@@ -1051,6 +1178,10 @@ static void cleanup(void) {
     if (g_guest_stack) munmap(g_guest_stack, GUEST_STACK_SIZE);
     g_guest_stack = NULL;
     g_guest_stack_top = NULL;
+
+    if (g_nx2_region) munmap(g_nx2_region, g_nx2_region_size);
+    g_nx2_region = NULL;
+    g_nx2_region_size = 0;
 
     free(g_guest_tls);
     free(g_guest_tlr);
@@ -1155,8 +1286,25 @@ Java_org_nx2a_stage1c_MainActivity_runBootstrap(
         (void *)align_down_ptr(
             (uintptr_t)(g_guest_stack + GUEST_STACK_SIZE - 16), 16);
 
+    g_nx2_region_size = NX2_REGION_SIZE;
+    g_nx2_region = (uint8_t *)mmap(
+        NULL, g_nx2_region_size,
+        PROT_NONE,
+        MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE,
+        -1, 0);
+    if (g_nx2_region == MAP_FAILED) {
+        g_nx2_region = NULL;
+        add(&o, "STAGE1C_RESULT=BLOCKED_NX2_REGION_RESERVATION errno=%d\n", errno);
+        goto done;
+    }
+
+    memset((void *)g_getinfo_hits, 0, sizeof(g_getinfo_hits));
+
     add(&o, "guest_tls_seed=%p guest_tlr_seed=%p guest_stack_top=%p\n",
         g_guest_tls, g_guest_tlr, g_guest_stack_top);
+    add(&o, "nx2_vamm_region=%p size=0x%zx (%.2f GiB sparse reserve)\n",
+        g_nx2_region, g_nx2_region_size,
+        (double)g_nx2_region_size / 1073741824.0);
 
     SignalGuard guard;
     if (!signal_guard_install(&guard)) {
@@ -1186,6 +1334,17 @@ Java_org_nx2a_stage1c_MainActivity_runBootstrap(
     }
 
     signal_guard_remove(&guard);
+
+    add(&o, "\nGetInfo hits:");
+    int any_getinfo = 0;
+    for (int i = 0; i < 64; ++i) {
+        if (g_getinfo_hits[i]) {
+            add(&o, " id%d=%d", i, (int)g_getinfo_hits[i]);
+            any_getinfo = 1;
+        }
+    }
+    if (!any_getinfo) add(&o, " none");
+    add(&o, "\n");
 
     if (running) {
         add(&o, "\nSTAGE1C_RESULT=GUEST_RETURNED_THROUGH_ALL_PHASES\n");

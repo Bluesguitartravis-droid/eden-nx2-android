@@ -50,6 +50,8 @@
 #define STUB_BYTES (MAX_IMPORTS * 8)
 #define GUEST_STACK_SIZE (2u << 20)
 #define MAX_PHYS_RANGES 4096
+#define MAX_IPC_SESSIONS 128
+#define SM_SESSION_HANDLE 0x100u
 #define HEAP_REGION_SIZE  (12ull << 30)
 #define ALIAS_REGION_MAX   (64ull << 30)
 #define ALIAS_REGION_MIN   (16ull << 30)
@@ -162,6 +164,21 @@ typedef struct {
 
 static PhysRange g_phys[MAX_PHYS_RANGES];
 static unsigned g_phys_count;
+
+typedef struct {
+    uint32_t handle;
+    char name[12];
+    int active;
+} IpcSession;
+
+static IpcSession g_ipc_sessions[MAX_IPC_SESSIONS];
+static unsigned g_ipc_session_count;
+static uint32_t g_next_ipc_handle = 0x200;
+static int g_sm_initialized;
+static char g_ipc_stop_service[16];
+static uint32_t g_ipc_stop_command;
+static uint32_t g_ipc_stop_type;
+static uint32_t g_ipc_stop_words[16];
 
 static int32_t g_main_thread_priority = 44;
 static int32_t g_main_thread_core = 0;
@@ -934,6 +951,206 @@ static uint64_t switch2_counter(void) {
     return (uint64_t)v;
 }
 
+
+static int guest_readable(uint64_t addr, size_t n) {
+    if (!addr || !n || addr + n < addr) return 0;
+
+    for (int i = 0; i < g_nmod; ++i) {
+        uint64_t b = (uint64_t)(uintptr_t)g_mod[i].base;
+        if (addr >= b && addr + n <= b + g_mod[i].map_size) return 1;
+    }
+
+    uint64_t sb = (uint64_t)(uintptr_t)g_guest_stack;
+    if (g_guest_stack && addr >= sb && addr + n <= sb + GUEST_STACK_SIZE) return 1;
+
+    uint64_t tb = (uint64_t)(uintptr_t)g_guest_tls;
+    if (g_guest_tls && addr >= tb && addr + n <= tb + 0x4000) return 1;
+
+    uint64_t rb = (uint64_t)(uintptr_t)g_guest_tlr;
+    if (g_guest_tlr && addr >= rb && addr + n <= rb + 0x4000) return 1;
+
+    uint64_t hb = (uint64_t)(uintptr_t)g_heap_region;
+    if (g_heap_region && addr >= hb && addr + n <= hb + g_heap_current) return 1;
+
+    int k = phys_find_containing(addr);
+    if (k >= 0 && addr + n <= g_phys[k].base + g_phys[k].size) return 1;
+
+    return 0;
+}
+
+static int guest_copy_cstring(char *out, size_t cap, uint64_t addr) {
+    if (!out || cap < 2 || !addr) return 0;
+    size_t i = 0;
+    for (; i + 1 < cap; ++i) {
+        if (!guest_readable(addr + i, 1)) return 0;
+        char ch = *(const char *)(uintptr_t)(addr + i);
+        out[i] = ch;
+        if (!ch) return 1;
+    }
+    out[i] = 0;
+    return 1;
+}
+
+static IpcSession *ipc_find(uint32_t handle) {
+    if (handle == SM_SESSION_HANDLE) return NULL;
+    for (unsigned i = 0; i < g_ipc_session_count; ++i) {
+        if (g_ipc_sessions[i].active && g_ipc_sessions[i].handle == handle) {
+            return &g_ipc_sessions[i];
+        }
+    }
+    return NULL;
+}
+
+static uint32_t ipc_open_service(const char *name) {
+    for (unsigned i = 0; i < g_ipc_session_count; ++i) {
+        if (!g_ipc_sessions[i].active) {
+            g_ipc_sessions[i].active = 1;
+            g_ipc_sessions[i].handle = g_next_ipc_handle++;
+            snprintf(g_ipc_sessions[i].name, sizeof(g_ipc_sessions[i].name), "%s", name);
+            return g_ipc_sessions[i].handle;
+        }
+    }
+
+    if (g_ipc_session_count >= MAX_IPC_SESSIONS) return 0;
+    IpcSession *s = &g_ipc_sessions[g_ipc_session_count++];
+    memset(s, 0, sizeof(*s));
+    s->active = 1;
+    s->handle = g_next_ipc_handle++;
+    snprintf(s->name, sizeof(s->name), "%s", name);
+    return s->handle;
+}
+
+static void ipc_close(uint32_t handle) {
+    for (unsigned i = 0; i < g_ipc_session_count; ++i) {
+        if (g_ipc_sessions[i].handle == handle) {
+            g_ipc_sessions[i].active = 0;
+            return;
+        }
+    }
+}
+
+static uint32_t *ipc_command_buffer(void) {
+    // On Horizon, TPIDRRO_EL0 points at the thread-local region whose first
+    // 0x100 bytes are the IPC command buffer. Eden's KThread::GetTlsAddress()
+    // likewise points directly at this command area.
+    return (uint32_t *)g_guest_tlr;
+}
+
+typedef struct {
+    uint32_t type;
+    uint32_t command;
+    unsigned params_word;
+    int tipc;
+} IpcParsed;
+
+static int ipc_parse_request(uint32_t *b, IpcParsed *p) {
+    if (!b || !p) return 0;
+    memset(p, 0, sizeof(*p));
+
+    uint32_t low = b[0];
+    uint32_t high = b[1];
+    p->type = low & 0xffffu;
+
+    if (p->type >= 16) {
+        p->tipc = 1;
+        p->command = p->type - 16;
+        p->params_word = 2;
+        return 1;
+    }
+
+    // HIPC / CMIF: skip handle descriptor and buffer descriptors, then align
+    // to 16 bytes, skip SFCI header, then read the u64 command id.
+    unsigned x = (low >> 16) & 0xf;
+    unsigned a = (low >> 20) & 0xf;
+    unsigned bb = (low >> 24) & 0xf;
+    unsigned w = (low >> 28) & 0xf;
+    unsigned idx = 2;
+
+    if (high >> 31) {
+        uint32_t hd = b[idx++];
+        if (hd & 1) idx += 2;
+        idx += (hd >> 1) & 0xf;
+        idx += (hd >> 5) & 0xf;
+    }
+
+    idx += x * 2 + (a + bb + w) * 3;
+    idx = (idx + 3) & ~3u;
+
+    if (idx + 4 >= 64) return 0;
+    if (b[idx] != 0x49434653u) return 0; // SFCI
+
+    p->command = b[idx + 2];
+    p->params_word = idx + 4;
+    return 1;
+}
+
+static void ipc_reply_success(uint32_t *b, const IpcParsed *p) {
+    memset(b, 0, 0x100);
+    if (p->tipc) {
+        b[0] = p->type;
+        b[1] = 1; // one 32-bit result word in TIPC response payload
+        b[2] = 0; // ResultSuccess
+    } else {
+        b[0] = 0; // HIPC response type
+        b[1] = 10;
+        b[4] = 0x4f434653u; // SFCO
+        b[5] = 0;
+        b[6] = 0;
+        b[7] = 0;
+    }
+}
+
+static void ipc_reply_move_handle(
+        uint32_t *b, const IpcParsed *p, uint32_t handle) {
+    memset(b, 0, 0x100);
+    if (p->tipc) {
+        b[0] = p->type;
+        b[1] = 0x80000001u;
+        b[2] = 0x20; // one moved handle
+        b[3] = handle;
+        b[4] = 0;
+    } else {
+        b[0] = 0;
+        b[1] = 0x8000000au;
+        b[2] = 0x20;
+        b[3] = handle;
+        b[4] = 0x4f434653u; // SFCO
+        b[5] = 0;
+        b[6] = 0;
+        b[7] = 0;
+    }
+}
+
+static void ipc_capture_stop(const char *service, const IpcParsed *p, uint32_t *b) {
+    snprintf(g_ipc_stop_service, sizeof(g_ipc_stop_service), "%s", service ? service : "?");
+    g_ipc_stop_command = p ? p->command : UINT32_MAX;
+    g_ipc_stop_type = p ? p->type : UINT32_MAX;
+    for (unsigned i = 0; i < 16; ++i) g_ipc_stop_words[i] = b ? b[i] : 0;
+}
+
+static int ipc_sm_request(uint32_t *b, const IpcParsed *p) {
+    if (p->command == 0) { // SM::Initialize
+        g_sm_initialized = 1;
+        ipc_reply_success(b, p);
+        return 1;
+    }
+
+    if (p->command == 1 && g_sm_initialized) { // SM::GetService
+        char name[9];
+        memset(name, 0, sizeof(name));
+        memcpy(name, &b[p->params_word], 8);
+        for (int i = 7; i >= 0 && (name[i] == 0 || name[i] == ' '); --i) name[i] = 0;
+        if (!name[0]) snprintf(name, sizeof(name), "unknown");
+
+        uint32_t h = ipc_open_service(name);
+        if (!h) return 0;
+        ipc_reply_move_handle(b, p, h);
+        return 1;
+    }
+
+    return 0;
+}
+
 typedef struct {
     uint64_t base_address;
     uint64_t size;
@@ -1601,6 +1818,62 @@ static void guest_signal_handler(int sig, siginfo_t *si, void *ctx) {
                 return;
             }
         }
+        if (svc == 0x16) { // CloseHandle
+            uint32_t handle = (uint32_t)uc->uc_mcontext.regs[0];
+            if (handle == SM_SESSION_HANDLE || ipc_find(handle)) {
+                ipc_close(handle);
+                uc->uc_mcontext.regs[0] = 0;
+                uc->uc_mcontext.pc = resume;
+                return;
+            }
+        }
+        if (svc == 0x1f) { // ConnectToNamedPort
+            char port[16];
+            memset(port, 0, sizeof(port));
+            if (!guest_copy_cstring(port, sizeof(port), uc->uc_mcontext.regs[1])) {
+                stop_now(9, sig, 0x1f, trap_pc, uc->uc_mcontext.regs[1], insn);
+            }
+
+            if (!strcmp(port, "sm:")) {
+                uc->uc_mcontext.regs[0] = 0;
+                uc->uc_mcontext.regs[1] = SM_SESSION_HANDLE;
+                uc->uc_mcontext.pc = resume;
+                return;
+            }
+
+            IpcParsed none = {0};
+            uint32_t *b = ipc_command_buffer();
+            ipc_capture_stop(port, &none, b);
+            stop_now(9, sig, 0x1f, trap_pc, uc->uc_mcontext.regs[1], insn);
+        }
+        if (svc == 0x21) { // SendSyncRequest
+            uint32_t handle = (uint32_t)uc->uc_mcontext.regs[0];
+            uint32_t *b = ipc_command_buffer();
+            IpcParsed p;
+            if (!ipc_parse_request(b, &p)) {
+                ipc_capture_stop("malformed", NULL, b);
+                stop_now(9, sig, 0x21, trap_pc, handle, insn);
+            }
+
+            if (handle == SM_SESSION_HANDLE) {
+                if (ipc_sm_request(b, &p)) {
+                    uc->uc_mcontext.regs[0] = 0;
+                    uc->uc_mcontext.pc = resume;
+                    return;
+                }
+                ipc_capture_stop("sm:", &p, b);
+                stop_now(9, sig, 0x21, trap_pc, handle, insn);
+            }
+
+            IpcSession *session = ipc_find(handle);
+            if (session) {
+                ipc_capture_stop(session->name, &p, b);
+                stop_now(9, sig, 0x21, trap_pc, handle, insn);
+            }
+
+            ipc_capture_stop("bad-handle", &p, b);
+            stop_now(9, sig, 0x21, trap_pc, handle, insn);
+        }
         if (svc == 0x2c) { // MapPhysicalMemory
             uint64_t addr = uc->uc_mcontext.regs[0];
             uint64_t size = uc->uc_mcontext.regs[1];
@@ -1783,6 +2056,14 @@ static void report_stop(Out *o) {
             g_stop.arg == 0x2c ? "MapPhysicalMemory" : "UnmapPhysicalMemory",
             g_stop.fault);
         break;
+    case 9:
+        add(o,
+            "FIRST_DEPENDENCY=IPC service=%s command=%u type=0x%x\n",
+            g_ipc_stop_service, g_ipc_stop_command, g_ipc_stop_type);
+        add(o, "ipc_words:");
+        for (int i = 0; i < 16; ++i) add(o, " %08x", g_ipc_stop_words[i]);
+        add(o, "\n");
+        break;
     case 2:
         if (g_stop.arg >= 0 && (unsigned)g_stop.arg < g_nimport) {
             add(o, "FIRST_DEPENDENCY=unresolved_import %s\n",
@@ -1907,6 +2188,14 @@ Java_org_nx2a_stage1c_MainActivity_runBootstrap(
     g_main_thread_core = 0;
     g_main_thread_mask = 0x3f;
     g_main_thread_id = 1;
+    memset(g_ipc_sessions, 0, sizeof(g_ipc_sessions));
+    g_ipc_session_count = 0;
+    g_next_ipc_handle = 0x200;
+    g_sm_initialized = 0;
+    memset(g_ipc_stop_service, 0, sizeof(g_ipc_stop_service));
+    g_ipc_stop_command = 0;
+    g_ipc_stop_type = 0;
+    memset(g_ipc_stop_words, 0, sizeof(g_ipc_stop_words));
 
     char *report = (char *)calloc(1, REPORT_CAP);
     if (!report) {
@@ -1915,7 +2204,7 @@ Java_org_nx2a_stage1c_MainActivity_runBootstrap(
     Out o = {report, REPORT_CAP};
 
     add(&o, "NX2 Switch 2 Native Stage 1C Controlled Bootstrap\n");
-    add(&o, "harness_build=7\n");
+    add(&o, "harness_build=8\n");
     add(&o, "guest_execution=yes\n");
     add(&o, "graphics=no\n");
     add(&o, "romfs=no\n");
@@ -1995,6 +2284,9 @@ Java_org_nx2a_stage1c_MainActivity_runBootstrap(
         (void *)align_down_ptr(
             (uintptr_t)(g_guest_stack + GUEST_STACK_SIZE - 16), 16);
 
+    // Horizon stores the current thread handle in the TLR at +0x110.
+    *(uint32_t *)(g_guest_tlr + 0x110) = 1;
+
     if (!reserve_guest_geometry(&o)) {
         add(&o, "STAGE1C_RESULT=BLOCKED_GUEST_GEOMETRY\n");
         goto done;
@@ -2046,6 +2338,15 @@ Java_org_nx2a_stage1c_MainActivity_runBootstrap(
     }
     if (!any_svc) add(&o, " none");
     add(&o, "\n");
+
+    add(&o, "ipc_sessions=%u sm_initialized=%s\n",
+        g_ipc_session_count, g_sm_initialized ? "yes" : "no");
+    for (unsigned i = 0; i < g_ipc_session_count && i < 12; ++i) {
+        if (g_ipc_sessions[i].active) {
+            add(&o, "  ipc_handle=0x%x service=%s\n",
+                g_ipc_sessions[i].handle, g_ipc_sessions[i].name);
+        }
+    }
 
     add(&o, "physical_alias_ranges=%u mapped=0x%" PRIx64 "\n",
         g_phys_count, phys_mapped_total());

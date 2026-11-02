@@ -62,7 +62,7 @@ jobs:
       - name: Upload native probe
         uses: actions/upload-artifact@v4
         with:
-          name: nx2-switch2-native-probe-\${{ github.run_number }}
+          name: nx2-switch2-native-probe-${{ github.run_number }}
           path: |
             NX2-Switch2-Native-Probe.apk
             SHA256SUMS.txt

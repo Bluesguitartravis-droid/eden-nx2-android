@@ -7,7 +7,7 @@ backend and it does not alter the published Eden APK.
 
 Evaluate a second execution path inspired by shirai91/nx2android:
 
-\`\`\`text
+```text
 user-owned Switch 2 extracted title
         |
         v
@@ -21,7 +21,7 @@ NVN/Vulkan replay
         |
         v
 native Android execution
-\`\`\`
+```
 
 If this becomes viable, Eden can remain the library/settings/launcher shell and choose between:
 

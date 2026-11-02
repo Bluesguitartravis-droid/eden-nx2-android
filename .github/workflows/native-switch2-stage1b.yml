@@ -1,0 +1,138 @@
+name: Build Switch 2 Stage 1B Rewrite Census
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ feature/native-switch2-poc ]
+    paths:
+      - ".github/workflows/native-switch2-stage1b.yml"
+      - "native_track/stage1b/**"
+
+permissions:
+  contents: read
+
+jobs:
+  stage1b:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout research branch
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Android SDK pieces
+        shell: bash
+        run: |
+          set -euxo pipefail
+          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "ndk;27.2.12479018"
+
+      - name: Compile native Stage 1B analyzer
+        shell: bash
+        run: |
+          set -euxo pipefail
+          NDK="$ANDROID_SDK_ROOT/ndk/27.2.12479018"
+          CC="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang"
+          "$CC" -shared -fPIC -O2 -ffixed-x18 \
+            -Wl,-z,max-page-size=16384 \
+            native_track/stage1b/native/stage1b_analyzer.c \
+            -o libstage1b.so
+          file libstage1b.so
+
+      - name: Compile Java activity and dex
+        shell: bash
+        run: |
+          set -euxo pipefail
+          PLATFORM="$ANDROID_SDK_ROOT/platforms/android-36/android.jar"
+          BUILD_TOOLS="$ANDROID_SDK_ROOT/build-tools/36.0.0"
+
+          mkdir -p build/java build/dex
+          javac -source 11 -target 11 \
+            -classpath "$PLATFORM" \
+            -d build/java \
+            native_track/stage1b/src/org/nx2a/stage1b/MainActivity.java
+
+          "$BUILD_TOOLS/d8" \
+            --lib "$PLATFORM" \
+            --min-api 29 \
+            --output build/dex \
+            build/java/org/nx2a/stage1b/MainActivity.class
+
+      - name: Package and sign Stage 1B APK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          PLATFORM="$ANDROID_SDK_ROOT/platforms/android-36/android.jar"
+          BUILD_TOOLS="$ANDROID_SDK_ROOT/build-tools/36.0.0"
+
+          "$BUILD_TOOLS/aapt2" link \
+            -I "$PLATFORM" \
+            --manifest native_track/stage1b/AndroidManifest.xml \
+            --min-sdk-version 29 \
+            --target-sdk-version 36 \
+            --version-code 1 \
+            --version-name 0.1 \
+            -o build/stage1b-unsigned.apk
+
+          mkdir -p build/apk/lib/arm64-v8a
+          cp build/dex/classes.dex build/apk/classes.dex
+          cp libstage1b.so build/apk/lib/arm64-v8a/libstage1b.so
+          (
+            cd build/apk
+            zip -q -0 -r ../stage1b-unsigned.apk classes.dex lib
+          )
+
+          "$BUILD_TOOLS/zipalign" -f -p 4 \
+            build/stage1b-unsigned.apk \
+            build/stage1b-aligned.apk
+
+          keytool -genkeypair -noprompt \
+            -keystore build/stage1b-debug.jks \
+            -storepass android \
+            -keypass android \
+            -alias androiddebugkey \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=NX2 Stage1B Debug,O=NX2 Research,C=US"
+
+          "$BUILD_TOOLS/apksigner" sign \
+            --ks build/stage1b-debug.jks \
+            --ks-pass pass:android \
+            --key-pass pass:android \
+            --out NX2-Switch2-Stage1B-Rewrite-Census.apk \
+            build/stage1b-aligned.apk
+
+          "$BUILD_TOOLS/apksigner" verify --verbose \
+            NX2-Switch2-Stage1B-Rewrite-Census.apk
+
+          "$BUILD_TOOLS/aapt2" dump badging \
+            NX2-Switch2-Stage1B-Rewrite-Census.apk | head -20
+
+          sha256sum NX2-Switch2-Stage1B-Rewrite-Census.apk > SHA256SUMS-stage1b.txt
+          {
+            echo "Stage: 1B - NSO decompression and ARM64 rewrite census"
+            echo "Reads main and main.npdm on-device"
+            echo "Guest code is not executed"
+            echo "Switch 2 guest counter target: 31250000 Hz"
+            echo "Commit: $GITHUB_SHA"
+          } > stage1b-build-info.txt
+
+      - name: Upload Stage 1B APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: nx2-switch2-stage1b-${{ github.run_number }}
+          path: |
+            NX2-Switch2-Stage1B-Rewrite-Census.apk
+            SHA256SUMS-stage1b.txt
+            stage1b-build-info.txt
+          if-no-files-found: error
+          retention-days: 14

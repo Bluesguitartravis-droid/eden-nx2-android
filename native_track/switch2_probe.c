@@ -6,6 +6,7 @@
 #include <android/native_activity.h>
 #include <errno.h>
 #include <inttypes.h>
+#include <jni.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -19,20 +20,120 @@
 #define GIB(x) ((size_t)(x) << 30)
 
 static FILE* g_report;
+static char g_text[16384];
+static size_t g_text_len;
 
 static void line(const char* fmt, ...) {
+    char rendered[2048];
+
     va_list ap;
     va_start(ap, fmt);
+    vsnprintf(rendered, sizeof(rendered), fmt, ap);
+    va_end(ap);
+
     if (g_report) {
-        vfprintf(g_report, fmt, ap);
+        fputs(rendered, g_report);
         fputc('\n', g_report);
         fflush(g_report);
     }
-    va_end(ap);
 
-    va_start(ap, fmt);
-    __android_log_vprint(ANDROID_LOG_INFO, TAG, fmt, ap);
-    va_end(ap);
+    const size_t n = strlen(rendered);
+    if (g_text_len < sizeof(g_text) - 2) {
+        const size_t room = sizeof(g_text) - g_text_len - 2;
+        const size_t copy = n < room ? n : room;
+        memcpy(g_text + g_text_len, rendered, copy);
+        g_text_len += copy;
+        g_text[g_text_len++] = '\n';
+        g_text[g_text_len] = '\0';
+    }
+
+    __android_log_print(ANDROID_LOG_INFO, TAG, "%s", rendered);
+}
+
+static void copy_results_to_clipboard(ANativeActivity* activity) {
+    JNIEnv* env = activity->env;
+    if (env == NULL || activity->clazz == NULL) {
+        return;
+    }
+
+    jclass context_class = (*env)->GetObjectClass(env, activity->clazz);
+    jmethodID get_service = (*env)->GetMethodID(
+        env,
+        context_class,
+        "getSystemService",
+        "(Ljava/lang/String;)Ljava/lang/Object;"
+    );
+    jstring clipboard_name = (*env)->NewStringUTF(env, "clipboard");
+    jobject clipboard = (*env)->CallObjectMethod(
+        env,
+        activity->clazz,
+        get_service,
+        clipboard_name
+    );
+
+    jclass clipdata_class = (*env)->FindClass(env, "android/content/ClipData");
+    jmethodID new_plain_text = (*env)->GetStaticMethodID(
+        env,
+        clipdata_class,
+        "newPlainText",
+        "(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Landroid/content/ClipData;"
+    );
+    jstring label = (*env)->NewStringUTF(env, "NX2 Switch 2 Native Probe");
+    jstring text = (*env)->NewStringUTF(env, g_text);
+    jobject clip = (*env)->CallStaticObjectMethod(
+        env,
+        clipdata_class,
+        new_plain_text,
+        label,
+        text
+    );
+
+    if (clipboard != NULL && clip != NULL) {
+        jclass clipboard_class = (*env)->GetObjectClass(env, clipboard);
+        jmethodID set_primary_clip = (*env)->GetMethodID(
+            env,
+            clipboard_class,
+            "setPrimaryClip",
+            "(Landroid/content/ClipData;)V"
+        );
+        (*env)->CallVoidMethod(env, clipboard, set_primary_clip, clip);
+        (*env)->DeleteLocalRef(env, clipboard_class);
+    }
+
+    jclass toast_class = (*env)->FindClass(env, "android/widget/Toast");
+    jmethodID make_text = (*env)->GetStaticMethodID(
+        env,
+        toast_class,
+        "makeText",
+        "(Landroid/content/Context;Ljava/lang/CharSequence;I)Landroid/widget/Toast;"
+    );
+    jstring toast_message = (*env)->NewStringUTF(
+        env,
+        "Probe complete - results copied to clipboard. Paste them into ChatGPT."
+    );
+    jobject toast = (*env)->CallStaticObjectMethod(
+        env,
+        toast_class,
+        make_text,
+        activity->clazz,
+        toast_message,
+        1
+    );
+    if (toast != NULL) {
+        jmethodID show = (*env)->GetMethodID(env, toast_class, "show", "()V");
+        (*env)->CallVoidMethod(env, toast, show);
+    }
+
+    (*env)->DeleteLocalRef(env, clipboard_name);
+    (*env)->DeleteLocalRef(env, clipboard);
+    (*env)->DeleteLocalRef(env, clipdata_class);
+    (*env)->DeleteLocalRef(env, label);
+    (*env)->DeleteLocalRef(env, text);
+    (*env)->DeleteLocalRef(env, clip);
+    (*env)->DeleteLocalRef(env, toast_class);
+    (*env)->DeleteLocalRef(env, toast_message);
+    (*env)->DeleteLocalRef(env, toast);
+    (*env)->DeleteLocalRef(env, context_class);
 }
 
 static int test_va_reservation(void) {
@@ -171,6 +272,8 @@ void ANativeActivity_onCreate(ANativeActivity* activity,
     snprintf(path, sizeof(path), "%s/switch2-native-probe.txt",
              base ? base : "/data/local/tmp");
 
+    g_text_len = 0;
+    g_text[0] = '\0';
     g_report = fopen(path, "w");
     line("NX2 Switch 2 Native Android Probe");
     line("report=%s", path);
@@ -195,5 +298,7 @@ void ANativeActivity_onCreate(ANativeActivity* activity,
         fclose(g_report);
         g_report = NULL;
     }
+
+    copy_results_to_clipboard(activity);
     LOGI("Probe complete: %s", path);
 }

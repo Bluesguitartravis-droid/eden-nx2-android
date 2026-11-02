@@ -123,18 +123,18 @@ jobs:
             --ks build/stage1c-debug.jks \
             --ks-pass pass:android \
             --key-pass pass:android \
-            --out NX2-Switch2-Stage1C-B6-Controlled-Bootstrap.apk \
+            --out NX2-Switch2-Stage1C-B7-Controlled-Bootstrap.apk \
             build/stage1c-aligned.apk
 
           "$BUILD_TOOLS/apksigner" verify --verbose \
-            NX2-Switch2-Stage1C-B6-Controlled-Bootstrap.apk
+            NX2-Switch2-Stage1C-B7-Controlled-Bootstrap.apk
 
           "$BUILD_TOOLS/aapt2" dump badging \
-            NX2-Switch2-Stage1C-B6-Controlled-Bootstrap.apk | head -20
+            NX2-Switch2-Stage1C-B7-Controlled-Bootstrap.apk | head -20
 
-          sha256sum NX2-Switch2-Stage1C-B6-Controlled-Bootstrap.apk > SHA256SUMS-stage1c.txt
+          sha256sum NX2-Switch2-Stage1C-B7-Controlled-Bootstrap.apk > SHA256SUMS-stage1c.txt
           {
-            echo "Stage: 1C build 6 - batched controlled guest execution"
+            echo "Stage: 1C build 7 - process memory accounting"
             echo "Hard locked to title 040074a01bf12000 and Stage 1B.2 build IDs"
             echo "Maps and relocates main + sdk; validates but does not execute rtld"
             echo "Switch SVCs/unresolved imports stop as guarded BRK events"
@@ -147,7 +147,7 @@ jobs:
         with:
           name: nx2-switch2-stage1c-${{ github.run_number }}
           path: |
-            NX2-Switch2-Stage1C-B6-Controlled-Bootstrap.apk
+            NX2-Switch2-Stage1C-B7-Controlled-Bootstrap.apk
             SHA256SUMS-stage1c.txt
             stage1c-build-info.txt
           if-no-files-found: error

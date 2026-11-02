@@ -49,6 +49,7 @@
 #define REPORT_CAP 131072
 #define STUB_BYTES (MAX_IMPORTS * 8)
 #define GUEST_STACK_SIZE (2u << 20)
+#define MAX_PHYS_RANGES 4096
 #define HEAP_REGION_SIZE  (12ull << 30)
 #define ALIAS_REGION_MAX   (64ull << 30)
 #define ALIAS_REGION_MIN   (16ull << 30)
@@ -152,6 +153,15 @@ static uint64_t g_aslr_region_size;
 
 static _Alignas(0x1000) uint8_t g_user_exception_ctx[0x1000];
 static volatile sig_atomic_t g_getinfo_hits[64];
+static volatile sig_atomic_t g_svc_hits[256];
+
+typedef struct {
+    uint64_t base;
+    uint64_t size;
+} PhysRange;
+
+static PhysRange g_phys[MAX_PHYS_RANGES];
+static unsigned g_phys_count;
 
 static int32_t g_main_thread_priority = 44;
 static int32_t g_main_thread_core = 0;
@@ -939,6 +949,172 @@ static int range_contains(uint64_t base, uint64_t size, uint64_t addr) {
     return size && addr >= base && addr < base + size;
 }
 
+static int phys_find_containing(uint64_t addr) {
+    for (unsigned i = 0; i < g_phys_count; ++i) {
+        uint64_t end = g_phys[i].base + g_phys[i].size;
+        if (addr >= g_phys[i].base && addr < end) return (int)i;
+        if (g_phys[i].base > addr) break;
+    }
+    return -1;
+}
+
+static int phys_add(uint64_t base, uint64_t size) {
+    if (!size) return 1;
+    uint64_t end = base + size;
+    if (end < base) return 0;
+
+    unsigned first = 0;
+    while (first < g_phys_count
+            && g_phys[first].base + g_phys[first].size < base) {
+        first++;
+    }
+
+    unsigned last = first;
+    uint64_t new_base = base;
+    uint64_t new_end = end;
+    while (last < g_phys_count && g_phys[last].base <= new_end) {
+        if (g_phys[last].base < new_base) new_base = g_phys[last].base;
+        uint64_t e = g_phys[last].base + g_phys[last].size;
+        if (e > new_end) new_end = e;
+        last++;
+    }
+
+    unsigned remove = last - first;
+    if (!remove && g_phys_count >= MAX_PHYS_RANGES) return 0;
+
+    if (remove != 1) {
+        memmove(
+            &g_phys[first + 1],
+            &g_phys[last],
+            (g_phys_count - last) * sizeof(g_phys[0]));
+        g_phys_count = g_phys_count - remove + 1;
+    }
+
+    g_phys[first].base = new_base;
+    g_phys[first].size = new_end - new_base;
+    return 1;
+}
+
+static int phys_remove(uint64_t base, uint64_t size) {
+    if (!size) return 1;
+    uint64_t end = base + size;
+    if (end < base) return 0;
+
+    for (unsigned i = 0; i < g_phys_count; ) {
+        uint64_t rb = g_phys[i].base;
+        uint64_t re = rb + g_phys[i].size;
+
+        if (re <= base) {
+            i++;
+            continue;
+        }
+        if (rb >= end) break;
+
+        if (base <= rb && end >= re) {
+            memmove(
+                &g_phys[i], &g_phys[i + 1],
+                (g_phys_count - i - 1) * sizeof(g_phys[0]));
+            g_phys_count--;
+            continue;
+        }
+
+        if (base <= rb) {
+            g_phys[i].base = end;
+            g_phys[i].size = re - end;
+            i++;
+            continue;
+        }
+
+        if (end >= re) {
+            g_phys[i].size = base - rb;
+            i++;
+            continue;
+        }
+
+        if (g_phys_count >= MAX_PHYS_RANGES) return 0;
+        memmove(
+            &g_phys[i + 2], &g_phys[i + 1],
+            (g_phys_count - i - 1) * sizeof(g_phys[0]));
+        g_phys[i].size = base - rb;
+        g_phys[i + 1].base = end;
+        g_phys[i + 1].size = re - end;
+        g_phys_count++;
+        return 1;
+    }
+    return 1;
+}
+
+static int alias_phys_info(
+        uint64_t addr, uint64_t *base, uint64_t *size,
+        uint32_t *state, uint32_t *perm) {
+    if (!g_alias_region) return 0;
+
+    uint64_t ab = (uint64_t)(uintptr_t)g_alias_region;
+    uint64_t ae = ab + g_alias_region_size;
+    if (addr < ab || addr >= ae) return 0;
+
+    int k = phys_find_containing(addr);
+    if (k >= 0) {
+        *base = g_phys[k].base;
+        *size = g_phys[k].size;
+        *state = 6; // Normal
+        *perm = 3;  // RW
+        return 1;
+    }
+
+    uint64_t lo = ab;
+    uint64_t hi = ae;
+    for (unsigned i = 0; i < g_phys_count; ++i) {
+        uint64_t rb = g_phys[i].base;
+        uint64_t re = rb + g_phys[i].size;
+        if (re <= addr && re > lo) lo = re;
+        if (rb > addr && rb < hi) {
+            hi = rb;
+            break;
+        }
+    }
+    *base = lo;
+    *size = hi - lo;
+    *state = 0;
+    *perm = 0;
+    return 1;
+}
+
+static int map_physical(uint64_t addr, uint64_t size) {
+    if (!g_alias_region || !size || (addr & 0xfff) || (size & 0xfff)) return 0;
+
+    uint64_t ab = (uint64_t)(uintptr_t)g_alias_region;
+    uint64_t ae = ab + g_alias_region_size;
+    if (addr < ab || addr + size < addr || addr + size > ae) return 0;
+
+    size_t page = (size_t)sysconf(_SC_PAGESIZE);
+    uintptr_t lo = align_down_ptr((uintptr_t)addr, page);
+    uintptr_t hi = align_up((size_t)(addr + size), page);
+
+    if (mprotect((void *)lo, hi - lo, PROT_READ | PROT_WRITE) != 0) return 0;
+    if (!phys_add(addr, size)) return 0;
+    return 1;
+}
+
+static int unmap_physical(uint64_t addr, uint64_t size) {
+    if (!g_alias_region || !size || (addr & 0xfff) || (size & 0xfff)) return 0;
+
+    uint64_t ab = (uint64_t)(uintptr_t)g_alias_region;
+    uint64_t ae = ab + g_alias_region_size;
+    if (addr < ab || addr + size < addr || addr + size > ae) return 0;
+
+    size_t page = (size_t)sysconf(_SC_PAGESIZE);
+    uintptr_t lo = align_up((size_t)addr, page);
+    uintptr_t hi = align_down_ptr((uintptr_t)(addr + size), page);
+
+    if (hi > lo) {
+        madvise((void *)lo, hi - lo, MADV_DONTNEED);
+        if (mprotect((void *)lo, hi - lo, PROT_NONE) != 0) return 0;
+    }
+
+    return phys_remove(addr, size);
+}
+
 static void classify_query_memory(
         uint64_t addr,
         uint64_t *base, uint64_t *size,
@@ -1024,14 +1200,7 @@ static void classify_query_memory(
         return;
     }
 
-    if (g_alias_region
-            && range_contains(
-                (uint64_t)(uintptr_t)g_alias_region,
-                g_alias_region_size, addr)) {
-        *base = (uint64_t)(uintptr_t)g_alias_region;
-        *size = g_alias_region_size;
-        *state = 0;
-        *perm = 0;
+    if (alias_phys_info(addr, base, size, state, perm)) {
         return;
     }
 
@@ -1307,6 +1476,7 @@ static void guest_signal_handler(int sig, siginfo_t *si, void *ctx) {
     if ((imm & 0xf000u) == TR_SVC) {
         unsigned svc = imm & 0x0fffu;
 
+        if (svc < 256) g_svc_hits[svc]++;
         for (int i = 0; i < 8; ++i) g_stop.regs[i] = uc->uc_mcontext.regs[i];
 
         if (svc == 0x06) { // QueryMemory
@@ -1386,6 +1556,41 @@ static void guest_signal_handler(int sig, siginfo_t *si, void *ctx) {
                 uc->uc_mcontext.pc = resume;
                 return;
             }
+        }
+        if (svc == 0x0b) { // SleepThread: bootstrap-safe yield/sleep shim
+            // The controlled bootstrap is single-threaded. Returning immediately is
+            // sufficient until actual guest thread creation is enabled.
+            uc->uc_mcontext.pc = resume;
+            return;
+        }
+        if (svc == 0x24) { // GetProcessId
+            uint64_t handle = uc->uc_mcontext.regs[1];
+            if (handle == 0xffff8001ULL || handle == 0xffff8000ULL || handle == 1) {
+                uc->uc_mcontext.regs[0] = 0;
+                uc->uc_mcontext.regs[1] = 1;
+                uc->uc_mcontext.pc = resume;
+                return;
+            }
+        }
+        if (svc == 0x2c) { // MapPhysicalMemory
+            uint64_t addr = uc->uc_mcontext.regs[0];
+            uint64_t size = uc->uc_mcontext.regs[1];
+            if (map_physical(addr, size)) {
+                uc->uc_mcontext.regs[0] = 0;
+                uc->uc_mcontext.pc = resume;
+                return;
+            }
+            stop_now(8, sig, 0x2c, trap_pc, addr, insn);
+        }
+        if (svc == 0x2d) { // UnmapPhysicalMemory
+            uint64_t addr = uc->uc_mcontext.regs[0];
+            uint64_t size = uc->uc_mcontext.regs[1];
+            if (unmap_physical(addr, size)) {
+                uc->uc_mcontext.regs[0] = 0;
+                uc->uc_mcontext.pc = resume;
+                return;
+            }
+            stop_now(8, sig, 0x2d, trap_pc, addr, insn);
         }
         if (svc == 0x01) { // SetHeapSize
             size_t requested = (size_t)uc->uc_mcontext.regs[1];
@@ -1543,6 +1748,12 @@ static void report_stop(Out *o) {
             "address=0x%" PRIx64 "\n",
             g_stop.fault);
         break;
+    case 8:
+        add(o,
+            "FIRST_DEPENDENCY=%s host_mapping_failure address=0x%" PRIx64 "\n",
+            g_stop.arg == 0x2c ? "MapPhysicalMemory" : "UnmapPhysicalMemory",
+            g_stop.fault);
+        break;
     case 2:
         if (g_stop.arg >= 0 && (unsigned)g_stop.arg < g_nimport) {
             add(o, "FIRST_DEPENDENCY=unresolved_import %s\n",
@@ -1675,7 +1886,7 @@ Java_org_nx2a_stage1c_MainActivity_runBootstrap(
     Out o = {report, REPORT_CAP};
 
     add(&o, "NX2 Switch 2 Native Stage 1C Controlled Bootstrap\n");
-    add(&o, "harness_build=5\n");
+    add(&o, "harness_build=6\n");
     add(&o, "guest_execution=yes\n");
     add(&o, "graphics=no\n");
     add(&o, "romfs=no\n");
@@ -1761,6 +1972,8 @@ Java_org_nx2a_stage1c_MainActivity_runBootstrap(
     }
 
     memset((void *)g_getinfo_hits, 0, sizeof(g_getinfo_hits));
+    memset((void *)g_svc_hits, 0, sizeof(g_svc_hits));
+    g_phys_count = 0;
 
     add(&o, "guest_tls_seed=%p guest_tlr_seed=%p guest_stack_top=%p\n",
         g_guest_tls, g_guest_tlr, g_guest_stack_top);
@@ -1794,7 +2007,20 @@ Java_org_nx2a_stage1c_MainActivity_runBootstrap(
 
     signal_guard_remove(&guard);
 
-    add(&o, "\nGetInfo hits:");
+    add(&o, "\nSVC hits:");
+    int any_svc = 0;
+    for (int i = 0; i < 256; ++i) {
+        if (g_svc_hits[i]) {
+            add(&o, " 0x%02x=%d", i, (int)g_svc_hits[i]);
+            any_svc = 1;
+        }
+    }
+    if (!any_svc) add(&o, " none");
+    add(&o, "\n");
+
+    add(&o, "physical_alias_ranges=%u\n", g_phys_count);
+
+    add(&o, "GetInfo hits:");
     int any_getinfo = 0;
     for (int i = 0; i < 64; ++i) {
         if (g_getinfo_hits[i]) {

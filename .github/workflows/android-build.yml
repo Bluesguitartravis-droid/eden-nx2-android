@@ -128,6 +128,13 @@ jobs:
           ./gradlew tasks --all > "$GITHUB_WORKSPACE/gradle-tasks.txt"
           grep -E "assemble.*(Standard|Release|Debug)" "$GITHUB_WORKSPACE/gradle-tasks.txt" | head -n 80 || true
 
+      - name: Kotlin compile preflight
+        shell: bash
+        working-directory: upstream/src/android
+        run: |
+          set -o pipefail
+          ./gradlew app:compileMainlineReleaseKotlin --stacktrace --no-daemon 2>&1 | tee "$GITHUB_WORKSPACE/android-build.log"
+
       - name: Build standard ARM64 APK
         shell: bash
         working-directory: upstream/src/android

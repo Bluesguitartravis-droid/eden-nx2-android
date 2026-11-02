@@ -1381,7 +1381,6 @@ static int ipc_service_request(
 }
 
 typedef struct {
-    uint64_t base_address;typedef struct {
     uint64_t base_address;
     uint64_t size;
     uint32_t state;

@@ -27,6 +27,8 @@ permissions:
 jobs:
   inspect-upstream:
     if: github.event_name == 'workflow_dispatch' && inputs.inspect != ''
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -34,18 +36,25 @@ jobs:
         shell: bash
         env:
           INSPECT: ${{ inputs.inspect }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           git clone --recursive --branch nx2-android --single-branch https://git.eden-emu.dev/moceure/eden-nx2-android.git upstream
           git -C upstream checkout ee1e9a0e408f2725baf15f7ca2246e746f31b849
           git -C upstream submodule update --init --recursive
           cd upstream
-          # Annotations are readable through the API when logs are not; chunk output into them.
           bash -c "$INSPECT" > ../inspect.txt 2>&1 || true
-          split -b 60000 -d ../inspect.txt ../chunk-
-          for c in ../chunk-*; do
-            body="$(sed -e 's/%/%25/g' -e 's/\r/%0D/g' "$c" | awk 'BEGIN{ORS="%0A"}{print}')"
-            echo "::notice title=inspect-$(basename "$c")::$body"
-          done
+          # Logs and artifacts are not downloadable from every debugging environment,
+          # so publish the full output to a scratch branch that git can fetch.
+          cd ..
+          mkdir out && cp inspect.txt out/ && cd out
+          git init -q && git checkout -q -b inspect-output
+          git -c user.name=github-actions -c user.email=github-actions@users.noreply.github.com \
+            commit -qm "inspect output for run ${GITHUB_RUN_ID}" --allow-empty
+          git add inspect.txt
+          git -c user.name=github-actions -c user.email=github-actions@users.noreply.github.com \
+            commit -qm "inspect output for run ${GITHUB_RUN_ID}"
+          git push -qf "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" inspect-output:refs/heads/ci/inspect-output
+          echo "::notice title=inspect-done::run ${GITHUB_RUN_ID}, $(wc -c < inspect.txt) bytes on ci/inspect-output"
 
   android-arm64:
     if: github.event_name != 'workflow_dispatch' || !inputs.skip_build

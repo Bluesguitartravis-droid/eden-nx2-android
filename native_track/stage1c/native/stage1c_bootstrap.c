@@ -1324,6 +1324,43 @@ static int ipc_control_request(
     }
 }
 
+// Survey mode: an unimplemented command on a known service is logged and answered
+// with a plain success, so one run lists many missing commands instead of stopping
+// at the first. A later failure (a null object, a bad handle, a crash) still stops
+// the run; the list shows what led up to it.
+#define MAX_UNKNOWN_IPC 64
+typedef struct {
+    char service[12];
+    uint32_t command;
+    uint32_t count;
+} UnknownIpc;
+static UnknownIpc g_unknown_ipc[MAX_UNKNOWN_IPC];
+static unsigned g_unknown_ipc_count;
+static unsigned g_unknown_ipc_total;
+
+static int ipc_survey_unknown(const char *service, uint32_t *b, const IpcParsed *p) {
+    if (!service || !p || p->command == UINT32_MAX) return 0;
+    for (unsigned i = 0; i < g_unknown_ipc_count; ++i) {
+        if (g_unknown_ipc[i].command == p->command
+                && !strcmp(g_unknown_ipc[i].service, service)) {
+            g_unknown_ipc[i].count++;
+            g_unknown_ipc_total++;
+            goto reply;
+        }
+    }
+    if (g_unknown_ipc_count >= MAX_UNKNOWN_IPC) return 0;
+    snprintf(g_unknown_ipc[g_unknown_ipc_count].service,
+             sizeof(g_unknown_ipc[0].service), "%s", service);
+    g_unknown_ipc[g_unknown_ipc_count].command = p->command;
+    g_unknown_ipc[g_unknown_ipc_count].count = 1;
+    g_unknown_ipc_count++;
+    g_unknown_ipc_total++;
+reply:
+    if (p->domain) ipc_reply_domain_success(b);
+    else ipc_reply_success(b, p);
+    return 1;
+}
+
 static int ipc_reply_new_object(
         IpcSession *session, uint32_t *b, const IpcParsed *p, const char *name) {
     if (p->domain) {
@@ -2181,7 +2218,8 @@ static void guest_signal_handler(int sig, siginfo_t *si, void *ctx) {
                         stop_now(9, sig, 0x21, trap_pc, handle, insn);
                     }
 
-                    if (ipc_service_request(session, target, b, &p)) {
+                    if (ipc_service_request(session, target, b, &p)
+                            || ipc_survey_unknown(target, b, &p)) {
                         uc->uc_mcontext.regs[0] = 0;
                         uc->uc_mcontext.pc = resume;
                         return;
@@ -2190,7 +2228,8 @@ static void guest_signal_handler(int sig, siginfo_t *si, void *ctx) {
                     stop_now(9, sig, 0x21, trap_pc, handle, insn);
                 }
 
-                if (ipc_service_request(session, session->name, b, &p)) {
+                if (ipc_service_request(session, session->name, b, &p)
+                        || ipc_survey_unknown(session->name, b, &p)) {
                     uc->uc_mcontext.regs[0] = 0;
                     uc->uc_mcontext.pc = resume;
                     return;
@@ -2522,6 +2561,9 @@ Java_org_nx2a_stage1c_MainActivity_runBootstrap(
     g_sm_initialized = 0;
     g_pointer_buffer_size = 0x10000;
     memset(g_ipc_stop_service, 0, sizeof(g_ipc_stop_service));
+    memset(g_unknown_ipc, 0, sizeof(g_unknown_ipc));
+    g_unknown_ipc_count = 0;
+    g_unknown_ipc_total = 0;
     g_ipc_stop_command = 0;
     g_ipc_stop_type = 0;
     memset(g_ipc_stop_words, 0, sizeof(g_ipc_stop_words));
@@ -2533,7 +2575,7 @@ Java_org_nx2a_stage1c_MainActivity_runBootstrap(
     Out o = {report, REPORT_CAP};
 
     add(&o, "NX2 Switch 2 Native Stage 1C Controlled Bootstrap\n");
-    add(&o, "harness_build=11\n");
+    add(&o, "harness_build=12\n");
     add(&o, "guest_execution=yes\n");
     add(&o, "graphics=no\n");
     add(&o, "romfs=no\n");
@@ -2668,6 +2710,12 @@ Java_org_nx2a_stage1c_MainActivity_runBootstrap(
     if (!any_svc) add(&o, " none");
     add(&o, "\n");
 
+    add(&o, "survey_unknown_ipc=%u distinct=%u%s\n", g_unknown_ipc_total,
+        g_unknown_ipc_count, g_unknown_ipc_count >= MAX_UNKNOWN_IPC ? " (list full)" : "");
+    for (unsigned i = 0; i < g_unknown_ipc_count; ++i) {
+        add(&o, "  stubbed %s cmd=%u x%u\n", g_unknown_ipc[i].service,
+            g_unknown_ipc[i].command, g_unknown_ipc[i].count);
+    }
     add(&o, "ipc_sessions=%u sm_initialized=%s pointer_buffer=0x%x\n",
         g_ipc_session_count, g_sm_initialized ? "yes" : "no",
         g_pointer_buffer_size);

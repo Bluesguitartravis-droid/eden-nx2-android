@@ -10,6 +10,7 @@ package org.yuzu.yuzu_emu.features.packer
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.provider.DocumentsContract
 import android.view.Gravity
 import android.view.View
 import android.widget.EditText
@@ -222,6 +223,14 @@ class SnapshotPackerActivity : AppCompatActivity() {
 
     private fun startPackaging(outputTree: Uri) {
         val selected = snapshot ?: return
+        if (isSameOrDescendantTree(outputTree, selected.root.uri)) {
+            Toast.makeText(
+                this,
+                "Choose an output folder outside the extracted game snapshot.",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
         val title = titleInput.text?.toString()?.trim().orEmpty().ifEmpty { selected.title }
 
         sourceButton.isEnabled = false
@@ -278,6 +287,17 @@ class SnapshotPackerActivity : AppCompatActivity() {
                     Toast.makeText(this@SnapshotPackerActivity, message, Toast.LENGTH_LONG).show()
                 }
             }
+        }
+    }
+
+    private fun isSameOrDescendantTree(candidateTree: Uri, sourceDocument: Uri): Boolean {
+        if (candidateTree.authority != sourceDocument.authority) return false
+        return try {
+            val candidateId = DocumentsContract.getTreeDocumentId(candidateTree)
+            val sourceId = DocumentsContract.getDocumentId(sourceDocument)
+            candidateId == sourceId || candidateId.startsWith("$sourceId/")
+        } catch (_: IllegalArgumentException) {
+            false
         }
     }
 
@@ -380,6 +400,7 @@ class SnapshotPackerActivity : AppCompatActivity() {
 
         fun pack(snapshot: Snapshot, outputRoot: DocumentFile, title: String): String {
             checkpoint()
+            require(hasAnyFile(snapshot.romfs)) { "The RomFS folder is empty." }
             val safeTitle = sanitize(title)
             val titleIdHex = String.format(Locale.US, "%016X", snapshot.titleId)
             val folderName = "$safeTitle [$titleIdHex]"
@@ -495,6 +516,15 @@ class SnapshotPackerActivity : AppCompatActivity() {
 
         private fun checkpoint() {
             if (cancelled()) throw CancellationException("Packaging cancelled")
+        }
+
+        private fun hasAnyFile(dir: DocumentFile): Boolean {
+            checkpoint()
+            for (child in dir.listFiles()) {
+                if (child.isFile) return true
+                if (child.isDirectory && hasAnyFile(child)) return true
+            }
+            return false
         }
 
         private fun sanitize(text: String): String = text

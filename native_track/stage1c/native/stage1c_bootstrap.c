@@ -952,6 +952,8 @@ static uint64_t switch2_counter(void) {
 }
 
 
+static int phys_find_containing(uint64_t addr);
+
 static int guest_readable(uint64_t addr, size_t n) {
     if (!addr || !n || addr + n < addr) return 0;
 

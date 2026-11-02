@@ -12,7 +12,7 @@ on:
         type: boolean
         default: false
   push:
-    branches: [ main, feature/sx2a-pokedinner-base ]
+    branches: [ main, feature/plaintext-nsp-packer ]
     paths:
       - ".github/workflows/android-build.yml"
       - "patches/**"
@@ -89,6 +89,14 @@ jobs:
           grep -n 'applicationId = "dev.eden.eden_emulator"' upstream/src/android/app/build.gradle.kts
           grep -n 'ENABLE_UPDATE_CHECKER=ON' upstream/src/android/app/build.gradle.kts
           grep -n -A8 'NX2 Android fork update feed' upstream/CMakeModules/GenerateSCMRev.cmake
+
+      - name: Add extracted snapshot NSP packer
+        shell: bash
+        run: |
+          python3 scripts/apply-snapshot-packer.py upstream
+          test -f upstream/src/android/app/src/main/java/org/yuzu/yuzu_emu/features/packer/SnapshotPackerActivity.kt
+          grep -n 'R.string.snapshot_packer' upstream/src/android/app/src/main/java/org/yuzu/yuzu_emu/fragments/HomeSettingsFragment.kt
+          grep -n 'SnapshotPackerActivity' upstream/src/android/app/src/main/AndroidManifest.xml
 
       - name: Detect Android build requirements
         id: android_req

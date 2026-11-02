@@ -133,7 +133,10 @@ jobs:
         working-directory: upstream/src/android
         run: |
           set -o pipefail
-          ./gradlew app:compileMainlineReleaseKotlin --stacktrace --no-daemon 2>&1 | tee "$GITHUB_WORKSPACE/android-build.log"
+          # CMake configure stages SDL's Java sources into externals/generated/sdl/java.
+          # It is fast compared with the full 1,700+ object native build.
+          ./gradlew 'app:configureCMakeRelWithDebInfo[arm64-v8a]' --stacktrace --no-daemon 2>&1 | tee "$GITHUB_WORKSPACE/android-build.log"
+          ./gradlew app:compileMainlineReleaseKotlin --stacktrace --no-daemon 2>&1 | tee -a "$GITHUB_WORKSPACE/android-build.log"
 
       - name: Build standard ARM64 APK
         shell: bash
@@ -174,9 +177,9 @@ jobs:
             body="$(cat | head -c 60000 | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | awk 'BEGIN{ORS="%0A"}{print}')"
             [ -n "$body" ] && echo "::error title=$1::$body"
           }
-          grep -nE "error:|Error:|FAILED|What went wrong|CMake Error|undefined reference|fatal error|> Task .* FAILED|Could not|not found" "$LOG" | head -n 150 | emit build-errors
-          grep -nA40 "What went wrong" "$LOG" | head -n 120 | emit what-went-wrong
-          grep -nB5 -A25 "CMake Error" "$LOG" | head -n 150 | emit cmake-error
+          (grep -nE "error:|Error:|FAILED|What went wrong|CMake Error|undefined reference|fatal error|> Task .* FAILED|Could not|not found" "$LOG" || true) | head -n 150 | emit build-errors
+          (grep -nA40 "What went wrong" "$LOG" || true) | head -n 120 | emit what-went-wrong
+          (grep -nB5 -A25 "CMake Error" "$LOG" || true) | head -n 150 | emit cmake-error
           tail -n 120 "$LOG" | emit log-tail
 
       - name: Collect build metadata

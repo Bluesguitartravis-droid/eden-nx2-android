@@ -51,6 +51,7 @@
 #define GUEST_STACK_SIZE (2u << 20)
 #define MAX_PHYS_RANGES 4096
 #define MAX_IPC_SESSIONS 128
+#define MAX_DOMAIN_OBJECTS 64
 #define SM_SESSION_HANDLE 0x100u
 #define HEAP_REGION_SIZE  (12ull << 30)
 #define ALIAS_REGION_MAX   (64ull << 30)
@@ -169,6 +170,9 @@ typedef struct {
     uint32_t handle;
     char name[12];
     int active;
+    int domain;
+    unsigned domain_count;
+    char domain_names[MAX_DOMAIN_OBJECTS][12];
 } IpcSession;
 
 static IpcSession g_ipc_sessions[MAX_IPC_SESSIONS];
@@ -1007,6 +1011,7 @@ static IpcSession *ipc_find(uint32_t handle) {
 static uint32_t ipc_open_service(const char *name) {
     for (unsigned i = 0; i < g_ipc_session_count; ++i) {
         if (!g_ipc_sessions[i].active) {
+            memset(&g_ipc_sessions[i], 0, sizeof(g_ipc_sessions[i]));
             g_ipc_sessions[i].active = 1;
             g_ipc_sessions[i].handle = g_next_ipc_handle++;
             snprintf(g_ipc_sessions[i].name, sizeof(g_ipc_sessions[i].name), "%s", name);
@@ -1032,6 +1037,36 @@ static void ipc_close(uint32_t handle) {
     }
 }
 
+static const char *ipc_domain_name(IpcSession *session, uint32_t object_id) {
+    if (!session || !session->domain || object_id == 0
+            || object_id > session->domain_count
+            || object_id > MAX_DOMAIN_OBJECTS) {
+        return NULL;
+    }
+    const char *name = session->domain_names[object_id - 1];
+    return name[0] ? name : NULL;
+}
+
+static uint32_t ipc_add_domain_object(IpcSession *session, const char *name) {
+    if (!session || !session->domain || !name
+            || session->domain_count >= MAX_DOMAIN_OBJECTS) {
+        return 0;
+    }
+    unsigned index = session->domain_count++;
+    snprintf(session->domain_names[index], sizeof(session->domain_names[index]), "%s", name);
+    return index + 1;
+}
+
+static int ipc_close_domain_object(IpcSession *session, uint32_t object_id) {
+    if (!session || !session->domain || object_id == 0
+            || object_id > session->domain_count
+            || object_id > MAX_DOMAIN_OBJECTS) {
+        return 0;
+    }
+    session->domain_names[object_id - 1][0] = 0;
+    return 1;
+}
+
 static uint32_t *ipc_command_buffer(void) {
     // On Horizon, TPIDRRO_EL0 points at the thread-local region whose first
     // 0x100 bytes are the IPC command buffer. Eden's KThread::GetTlsAddress()
@@ -1044,9 +1079,13 @@ typedef struct {
     uint32_t command;
     unsigned params_word;
     int tipc;
+    int domain;
+    uint32_t domain_command;
+    uint32_t domain_object_id;
+    unsigned domain_word;
 } IpcParsed;
 
-static int ipc_parse_request(uint32_t *b, IpcParsed *p) {
+static int ipc_parse_request(uint32_t *b, IpcParsed *p, int expect_domain) {
     if (!b || !p) return 0;
     memset(p, 0, sizeof(*p));
 
@@ -1062,7 +1101,8 @@ static int ipc_parse_request(uint32_t *b, IpcParsed *p) {
     }
 
     // HIPC / CMIF: skip handle descriptor and buffer descriptors, then align
-    // to 16 bytes, skip SFCI header, then read the u64 command id.
+    // the raw data area to 16 bytes. Domain Request/RequestWithContext packets
+    // place a 16-byte domain header before the SFCI data payload header.
     unsigned x = (low >> 16) & 0xf;
     unsigned a = (low >> 20) & 0xf;
     unsigned bb = (low >> 24) & 0xf;
@@ -1078,6 +1118,23 @@ static int ipc_parse_request(uint32_t *b, IpcParsed *p) {
 
     idx += x * 2 + (a + bb + w) * 3;
     idx = (idx + 3) & ~3u;
+
+    if (expect_domain && (p->type == 4 || p->type == 6)) {
+        if (idx + 4 >= 64) return 0;
+        p->domain = 1;
+        p->domain_word = idx;
+        uint32_t dh = b[idx];
+        p->domain_command = dh & 0xffu;
+        p->domain_object_id = b[idx + 1];
+
+        if (p->domain_command == 2) {
+            p->command = UINT32_MAX;
+            p->params_word = idx + 4;
+            return 1;
+        }
+        if (p->domain_command != 1) return 0;
+        idx += 4;
+    }
 
     if (idx + 4 >= 64) return 0;
     if (b[idx] != 0x49434653u) return 0; // SFCI
@@ -1123,11 +1180,61 @@ static void ipc_reply_success_u16(
     }
 }
 
+static void ipc_reply_success_u32(
+        uint32_t *b, const IpcParsed *p, uint32_t value) {
+    memset(b, 0, 0x100);
+    if (p->tipc) {
+        b[0] = p->type;
+        b[1] = 2;
+        b[2] = 0;
+        b[3] = value;
+    } else {
+        b[0] = 0;
+        b[1] = 12;
+        b[4] = 0x4f434653u; // SFCO
+        b[5] = 0;
+        b[6] = 0;
+        b[7] = 0;
+        b[8] = value;
+    }
+}
+
+static void ipc_reply_domain_success(uint32_t *b) {
+    memset(b, 0, 0x100);
+    b[0] = 0;
+    b[1] = 14;
+    b[4] = 0;
+    b[8] = 0x4f434653u; // SFCO
+    b[9] = 0;
+    b[10] = 0;
+    b[11] = 0;
+}
+
+static void ipc_reply_domain_object(uint32_t *b, uint32_t object_id) {
+    memset(b, 0, 0x100);
+    b[0] = 0;
+    b[1] = 15;
+    b[4] = 1;
+    b[8] = 0x4f434653u; // SFCO
+    b[9] = 0;
+    b[10] = 0;
+    b[11] = 0;
+    b[12] = object_id;
+}
+
 static uint32_t ipc_clone_session(uint32_t handle) {
     if (handle == SM_SESSION_HANDLE) return SM_SESSION_HANDLE;
     IpcSession *s = ipc_find(handle);
     if (!s) return 0;
-    return ipc_open_service(s->name);
+
+    uint32_t cloned_handle = ipc_open_service(s->name);
+    IpcSession *clone = ipc_find(cloned_handle);
+    if (!clone) return 0;
+
+    clone->domain = s->domain;
+    clone->domain_count = s->domain_count;
+    memcpy(clone->domain_names, s->domain_names, sizeof(clone->domain_names));
+    return cloned_handle;
 }
 
 static void ipc_reply_move_handle(
@@ -1184,19 +1291,27 @@ static int ipc_sm_request(uint32_t *b, const IpcParsed *p) {
 
 static int ipc_control_request(
         uint32_t handle, uint32_t *b, const IpcParsed *p) {
-    // HIPC Control / ControlWithContext commands operate on the session itself.
     switch (p->command) {
-    case 2: // DuplicateSession
-    case 4: { // DuplicateSessionEx
+    case 0: {
+        IpcSession *s = ipc_find(handle);
+        if (!s || s->domain) return 0;
+        s->domain = 1;
+        s->domain_count = 1;
+        snprintf(s->domain_names[0], sizeof(s->domain_names[0]), "%s", s->name);
+        ipc_reply_success_u32(b, p, 1);
+        return 1;
+    }
+    case 2:
+    case 4: {
         uint32_t h = ipc_clone_session(handle);
         if (!h) return 0;
         ipc_reply_move_handle(b, p, h);
         return 1;
     }
-    case 3: // QueryPointerBufferSize
+    case 3:
         ipc_reply_success_u16(b, p, (uint16_t)g_pointer_buffer_size);
         return 1;
-    case 5: // SetPointerBufferSize (newer Horizon)
+    case 5:
         if (p->params_word < 64) {
             uint32_t requested = b[p->params_word];
             g_pointer_buffer_size = requested > 0xffffu ? 0xffffu : requested;
@@ -1210,11 +1325,18 @@ static int ipc_control_request(
 }
 
 static int ipc_service_request(
-        IpcSession *session, uint32_t *b, const IpcParsed *p) {
-    if (!session) return 0;
+        IpcSession *session, const char *service,
+        uint32_t *b, const IpcParsed *p) {
+    if (!session || !service) return 0;
 
-    if (!strcmp(session->name, "lm")) {
-        if (p->command == 0) { // LM::OpenLogger
+    if (!strcmp(service, "lm")) {
+        if (p->command == 0) {
+            if (p->domain) {
+                uint32_t object_id = ipc_add_domain_object(session, "ILogger");
+                if (!object_id) return 0;
+                ipc_reply_domain_object(b, object_id);
+                return 1;
+            }
             uint32_t h = ipc_open_service("ILogger");
             if (!h) return 0;
             ipc_reply_move_handle(b, p, h);
@@ -1223,15 +1345,22 @@ static int ipc_service_request(
         return 0;
     }
 
-    if (!strcmp(session->name, "ILogger")) {
+    if (!strcmp(service, "ILogger")) {
         switch (p->command) {
-        case 0: // Log
-        case 1: // SetDestination
-        case 2: // TransmitHashedLog (20.0.0+)
-        case 3: // DevNotify (20.0.0+)
-            ipc_reply_success(b, p);
+        case 0:
+        case 1:
+        case 2:
+        case 3:
+            if (p->domain) ipc_reply_domain_success(b);
+            else ipc_reply_success(b, p);
             return 1;
-        case 11: { // Unknown11 returns another interface in current Eden
+        case 11: {
+            if (p->domain) {
+                uint32_t object_id = ipc_add_domain_object(session, "ILogger11");
+                if (!object_id) return 0;
+                ipc_reply_domain_object(b, object_id);
+                return 1;
+            }
             uint32_t h = ipc_open_service("ILogger11");
             if (!h) return 0;
             ipc_reply_move_handle(b, p, h);
@@ -1242,8 +1371,9 @@ static int ipc_service_request(
         }
     }
 
-    if (!strcmp(session->name, "ILogger11")) {
-        ipc_reply_success(b, p);
+    if (!strcmp(service, "ILogger11")) {
+        if (p->domain) ipc_reply_domain_success(b);
+        else ipc_reply_success(b, p);
         return 1;
     }
 
@@ -1251,6 +1381,7 @@ static int ipc_service_request(
 }
 
 typedef struct {
+    uint64_t base_address;typedef struct {
     uint64_t base_address;
     uint64_t size;
     uint32_t state;
@@ -1948,18 +2079,26 @@ static void guest_signal_handler(int sig, siginfo_t *si, void *ctx) {
         if (svc == 0x21) { // SendSyncRequest
             uint32_t handle = (uint32_t)uc->uc_mcontext.regs[0];
             uint32_t *b = ipc_command_buffer();
+            IpcSession *session = ipc_find(handle);
             IpcParsed p;
-            if (!ipc_parse_request(b, &p)) {
-                ipc_capture_stop("malformed", NULL, b);
+            if (!ipc_parse_request(b, &p, session && session->domain)) {
+                ipc_capture_stop(
+                    session && session->domain ? "malformed-domain" : "malformed",
+                    NULL, b);
                 stop_now(9, sig, 0x21, trap_pc, handle, insn);
             }
 
-            if (p.type == 5 || p.type == 7) { // Control / ControlWithContext
+            if (p.type == 5 || p.type == 7) {
                 if (ipc_control_request(handle, b, &p)) {
                     uc->uc_mcontext.regs[0] = 0;
                     uc->uc_mcontext.pc = resume;
                     return;
                 }
+                ipc_capture_stop(
+                    handle == SM_SESSION_HANDLE ? "sm:control"
+                        : (session ? session->name : "control"),
+                    &p, b);
+                stop_now(9, sig, 0x21, trap_pc, handle, insn);
             }
 
             if (handle == SM_SESSION_HANDLE) {
@@ -1972,9 +2111,35 @@ static void guest_signal_handler(int sig, siginfo_t *si, void *ctx) {
                 stop_now(9, sig, 0x21, trap_pc, handle, insn);
             }
 
-            IpcSession *session = ipc_find(handle);
             if (session) {
-                if (ipc_service_request(session, b, &p)) {
+                if (p.domain) {
+                    if (p.domain_command == 2) {
+                        if (!ipc_close_domain_object(session, p.domain_object_id)) {
+                            ipc_capture_stop("domain-close", &p, b);
+                            stop_now(9, sig, 0x21, trap_pc, handle, insn);
+                        }
+                        ipc_reply_domain_success(b);
+                        uc->uc_mcontext.regs[0] = 0;
+                        uc->uc_mcontext.pc = resume;
+                        return;
+                    }
+
+                    const char *target = ipc_domain_name(session, p.domain_object_id);
+                    if (!target) {
+                        ipc_capture_stop("domain-object", &p, b);
+                        stop_now(9, sig, 0x21, trap_pc, handle, insn);
+                    }
+
+                    if (ipc_service_request(session, target, b, &p)) {
+                        uc->uc_mcontext.regs[0] = 0;
+                        uc->uc_mcontext.pc = resume;
+                        return;
+                    }
+                    ipc_capture_stop(target, &p, b);
+                    stop_now(9, sig, 0x21, trap_pc, handle, insn);
+                }
+
+                if (ipc_service_request(session, session->name, b, &p)) {
                     uc->uc_mcontext.regs[0] = 0;
                     uc->uc_mcontext.pc = resume;
                     return;
@@ -2317,7 +2482,7 @@ Java_org_nx2a_stage1c_MainActivity_runBootstrap(
     Out o = {report, REPORT_CAP};
 
     add(&o, "NX2 Switch 2 Native Stage 1C Controlled Bootstrap\n");
-    add(&o, "harness_build=9\n");
+    add(&o, "harness_build=10\n");
     add(&o, "guest_execution=yes\n");
     add(&o, "graphics=no\n");
     add(&o, "romfs=no\n");
@@ -2457,8 +2622,17 @@ Java_org_nx2a_stage1c_MainActivity_runBootstrap(
         g_pointer_buffer_size);
     for (unsigned i = 0; i < g_ipc_session_count && i < 12; ++i) {
         if (g_ipc_sessions[i].active) {
-            add(&o, "  ipc_handle=0x%x service=%s\n",
-                g_ipc_sessions[i].handle, g_ipc_sessions[i].name);
+            IpcSession *s = &g_ipc_sessions[i];
+            add(&o, "  ipc_handle=0x%x service=%s domain=%s domain_objects=%u\n",
+                s->handle, s->name, s->domain ? "yes" : "no", s->domain_count);
+            if (s->domain) {
+                for (unsigned j = 0; j < s->domain_count && j < 12; ++j) {
+                    if (s->domain_names[j][0]) {
+                        add(&o, "    domain_object=%u service=%s\n",
+                            j + 1, s->domain_names[j]);
+                    }
+                }
+            }
         }
     }
 

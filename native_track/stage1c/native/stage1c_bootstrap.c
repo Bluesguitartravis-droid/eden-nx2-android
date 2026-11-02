@@ -949,6 +949,23 @@ static int range_contains(uint64_t base, uint64_t size, uint64_t addr) {
     return size && addr >= base && addr < base + size;
 }
 
+static uint64_t phys_mapped_total(void) {
+    uint64_t total = 0;
+    for (unsigned i = 0; i < g_phys_count; ++i) {
+        total += g_phys[i].size;
+    }
+    return total;
+}
+
+static uint64_t guest_used_physical_memory(void) {
+    uint64_t used = GUEST_STACK_SIZE + g_heap_current + phys_mapped_total();
+    for (int i = 0; i < g_nmod; ++i) {
+        used += g_mod[i].map_size;
+    }
+    if (used > HEAP_REGION_SIZE) used = HEAP_REGION_SIZE;
+    return used;
+}
+
 static int phys_find_containing(uint64_t addr) {
     for (unsigned i = 0; i < g_phys_count; ++i) {
         uint64_t end = g_phys[i].base + g_phys[i].size;
@@ -1291,6 +1308,12 @@ static int emulate_get_info(ucontext_t *uc) {
         if (g_heap_region) value = g_heap_region_size;
         else handled = 0;
         break;
+    case 6:   // TotalMemorySize
+        value = HEAP_REGION_SIZE;
+        break;
+    case 7:   // UsedMemorySize
+        value = guest_used_physical_memory();
+        break;
     case 8:   // DebuggerAttached
         value = 0;
         break;
@@ -1335,6 +1358,12 @@ static int emulate_get_info(ucontext_t *uc) {
         break;
     case 20:  // UserExceptionContextAddress
         value = (uint64_t)(uintptr_t)g_user_exception_ctx;
+        break;
+    case 21:  // TotalNonSystemMemorySize; NPDM system-resource size is zero.
+        value = HEAP_REGION_SIZE;
+        break;
+    case 22:  // UsedNonSystemMemorySize
+        value = guest_used_physical_memory();
         break;
     case 23:  // IsApplication
         value = 1;
@@ -1886,7 +1915,7 @@ Java_org_nx2a_stage1c_MainActivity_runBootstrap(
     Out o = {report, REPORT_CAP};
 
     add(&o, "NX2 Switch 2 Native Stage 1C Controlled Bootstrap\n");
-    add(&o, "harness_build=6\n");
+    add(&o, "harness_build=7\n");
     add(&o, "guest_execution=yes\n");
     add(&o, "graphics=no\n");
     add(&o, "romfs=no\n");
@@ -2018,7 +2047,10 @@ Java_org_nx2a_stage1c_MainActivity_runBootstrap(
     if (!any_svc) add(&o, " none");
     add(&o, "\n");
 
-    add(&o, "physical_alias_ranges=%u\n", g_phys_count);
+    add(&o, "physical_alias_ranges=%u mapped=0x%" PRIx64 "\n",
+        g_phys_count, phys_mapped_total());
+    add(&o, "accounted_used_memory=0x%" PRIx64 " total_memory=0x%llx\n",
+        guest_used_physical_memory(), (unsigned long long)HEAP_REGION_SIZE);
 
     add(&o, "GetInfo hits:");
     int any_getinfo = 0;

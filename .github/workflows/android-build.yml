@@ -38,9 +38,14 @@ jobs:
           INSPECT: ${{ inputs.inspect }}
           GH_TOKEN: ${{ github.token }}
         run: |
-          git clone --recursive --branch nx2-android --single-branch https://git.eden-emu.dev/moceure/eden-nx2-android.git upstream
+          # Source inspection needs no submodules; a plain clone is faster and
+          # does not fail when a submodule host is unavailable.
+          for try in 1 2 3; do
+            rm -rf upstream
+            git clone --branch nx2-android --single-branch https://git.eden-emu.dev/moceure/eden-nx2-android.git upstream && break
+            sleep 15
+          done
           git -C upstream checkout ee1e9a0e408f2725baf15f7ca2246e746f31b849
-          git -C upstream submodule update --init --recursive
           cd upstream
           bash -c "$INSPECT" > ../inspect.txt 2>&1 || true
           # Logs and artifacts are not downloadable from every debugging environment,

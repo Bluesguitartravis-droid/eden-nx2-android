@@ -38,23 +38,33 @@ jobs:
           INSPECT: ${{ inputs.inspect }}
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Source inspection needs no submodules; a plain clone is faster and
-          # does not fail when a submodule host is unavailable.
+          # Source inspection needs no submodules. Clone errors are published too,
+          # since logs are not readable from every debugging environment.
+          W="$GITHUB_WORKSPACE"
+          ok=0
           for try in 1 2 3; do
-            rm -rf upstream
-            git clone --branch nx2-android --single-branch https://git.eden-emu.dev/moceure/eden-nx2-android.git upstream && break
+            rm -rf "$W/upstream"
+            if git clone --branch nx2-android --single-branch \
+                https://git.eden-emu.dev/moceure/eden-nx2-android.git "$W/upstream" >> "$W/clone.log" 2>&1; then
+              ok=1; break
+            fi
             sleep 15
           done
-          git -C upstream checkout ee1e9a0e408f2725baf15f7ca2246e746f31b849
-          cd upstream
-          bash -c "$INSPECT" > ../inspect.txt 2>&1 || true
-          # Logs and artifacts are not downloadable from every debugging environment,
-          # so publish the full output to a scratch branch that git can fetch.
-          cd ..
-          mkdir out && cp inspect.txt out/ && cd out
+          if [ "$ok" = 1 ] && git -C "$W/upstream" checkout -q ee1e9a0e408f2725baf15f7ca2246e746f31b849 >> "$W/clone.log" 2>&1; then
+            (cd "$W/upstream" && bash -c "$INSPECT") > "$W/inspect.txt" 2>&1 || true
+          else
+            {
+              echo "CLONE FAILED"
+              cat "$W/clone.log"
+              echo "== curl upload-pack"
+              curl -sS -o /dev/null -w "%{http_code} %{url_effective}\n" -L \
+                "https://git.eden-emu.dev/moceure/eden-nx2-android.git/info/refs?service=git-upload-pack" 2>&1
+              echo "== curl headers"
+              curl -sS -I https://git.eden-emu.dev/ 2>&1 | head -20
+            } > "$W/inspect.txt"
+          fi
+          mkdir -p "$W/out" && cp "$W/inspect.txt" "$W/out/" && cd "$W/out"
           git init -q && git checkout -q -b inspect-output
-          git -c user.name=github-actions -c user.email=github-actions@users.noreply.github.com \
-            commit -qm "inspect output for run ${GITHUB_RUN_ID}" --allow-empty
           git add inspect.txt
           git -c user.name=github-actions -c user.email=github-actions@users.noreply.github.com \
             commit -qm "inspect output for run ${GITHUB_RUN_ID}"

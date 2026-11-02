@@ -727,7 +727,7 @@ class SnapshotPackerActivity : AppCompatActivity() {
 
             dirs.forEach { dir ->
                 val parentOffset = dir.parent?.offset ?: 0
-                val bucket = nameHash(parentOffset, dir.nameBytes) % dirBuckets.size
+                val bucket = (nameHash(parentOffset, dir.nameBytes).toUInt() % dirBuckets.size.toUInt()).toInt()
                 val at = dir.offset
                 putInt(dirTable, at, parentOffset)
                 putInt(dirTable, at + 4, dir.sibling)
@@ -741,7 +741,7 @@ class SnapshotPackerActivity : AppCompatActivity() {
 
             files.forEach { file ->
                 val parentOffset = file.parent.offset
-                val bucket = nameHash(parentOffset, file.nameBytes) % fileBuckets.size
+                val bucket = (nameHash(parentOffset, file.nameBytes).toUInt() % fileBuckets.size.toUInt()).toInt()
                 val at = file.offset
                 putInt(fileTable, at, parentOffset)
                 putInt(fileTable, at + 4, file.sibling)
@@ -805,7 +805,7 @@ class SnapshotPackerActivity : AppCompatActivity() {
                 val c = byte.toInt() and 0xff
                 hash = ((hash ushr 5) or (hash shl 27)) xor c
             }
-            return hash and Int.MAX_VALUE
+            return hash
         }
 
         private fun utf8Compare(a: String, b: String): Int {

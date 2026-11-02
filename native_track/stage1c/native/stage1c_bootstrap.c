@@ -1324,10 +1324,62 @@ static int ipc_control_request(
     }
 }
 
+static int ipc_reply_new_object(
+        IpcSession *session, uint32_t *b, const IpcParsed *p, const char *name) {
+    if (p->domain) {
+        uint32_t object_id = ipc_add_domain_object(session, name);
+        if (!object_id) return 0;
+        ipc_reply_domain_object(b, object_id);
+        return 1;
+    }
+    uint32_t h = ipc_open_service(name);
+    if (!h) return 0;
+    ipc_reply_move_handle(b, p, h);
+    return 1;
+}
+
+// Interfaces returned by IApplicationProxy, by command id. Ids and the Switch 2
+// additions (10 on appletOE, 40-90 here) follow the SX2A/Eden service tables.
+// Names are short because sessions store at most 11 characters.
+static const char *app_proxy_child(uint32_t command) {
+    switch (command) {
+    case 0:    return "CommonState";
+    case 1:    return "SelfCtrl";
+    case 2:    return "WindowCtrl";
+    case 3:    return "AudioCtrl";
+    case 4:    return "DisplayCtrl";
+    case 10:   return "ProcWinding";
+    case 11:   return "LibAppCreat";
+    case 20:   return "AppFuncs";
+    case 40:   return "Nx2Get40";
+    case 50:   return "Nx2Get50";
+    case 60:   return "GfxScale";
+    case 70:   return "Nx2Get70";
+    case 80:   return "Nx2Get80";
+    case 90:   return "Nx2Get90";
+    case 1000: return "DebugFuncs";
+    default:   return NULL;
+    }
+}
+
 static int ipc_service_request(
         IpcSession *session, const char *service,
         uint32_t *b, const IpcParsed *p) {
     if (!session || !service) return 0;
+
+    // appletOE: 0 = OpenApplicationProxy, 10 = its Switch 2 variant.
+    if (!strcmp(service, "appletOE")) {
+        if (p->command == 0 || p->command == 10) {
+            return ipc_reply_new_object(session, b, p, "AppProxy");
+        }
+        return 0;
+    }
+
+    if (!strcmp(service, "AppProxy")) {
+        const char *child = app_proxy_child(p->command);
+        if (!child) return 0;
+        return ipc_reply_new_object(session, b, p, child);
+    }
 
     if (!strcmp(service, "lm")) {
         if (p->command == 0) {
@@ -2481,7 +2533,7 @@ Java_org_nx2a_stage1c_MainActivity_runBootstrap(
     Out o = {report, REPORT_CAP};
 
     add(&o, "NX2 Switch 2 Native Stage 1C Controlled Bootstrap\n");
-    add(&o, "harness_build=10\n");
+    add(&o, "harness_build=11\n");
     add(&o, "guest_execution=yes\n");
     add(&o, "graphics=no\n");
     add(&o, "romfs=no\n");

@@ -126,7 +126,7 @@ jobs:
       - name: Upload Stage 1A APK
         uses: actions/upload-artifact@v4
         with:
-          name: nx2-switch2-stage1a-\${{ github.run_number }}
+          name: nx2-switch2-stage1a-${{ github.run_number }}
           path: |
             NX2-Switch2-Stage1A-Inspector.apk
             SHA256SUMS-stage1a.txt

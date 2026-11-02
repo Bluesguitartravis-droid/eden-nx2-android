@@ -53,7 +53,7 @@ public final class MainActivity extends Activity {
 
         TextView help = new TextView(this);
         help.setText(
-                "Choose the extracted ExeFS folder that contains main and main.npdm.\\n\\n" +
+                "Choose the extracted ExeFS folder that contains main and main.npdm.\n\n" +
                 "This build only reads their headers. It does not modify, decrypt, upload, " +
                 "or execute the game yet. The report is copied to your clipboard automatically.");
         help.setTextSize(16f);
@@ -115,12 +115,12 @@ public final class MainActivity extends Activity {
             Uri[] files = findRequiredFiles(tree);
             if (files[0] == null || files[1] == null) {
                 StringBuilder missing = new StringBuilder(
-                        "I could not find both required files in that folder.\\n\\n");
+                        "I could not find both required files in that folder.\n\n");
                 missing.append("main: ")
-                        .append(files[0] == null ? "MISSING" : "found").append('\\n');
+                        .append(files[0] == null ? "MISSING" : "found").append('\n');
                 missing.append("main.npdm: ")
-                        .append(files[1] == null ? "MISSING" : "found").append('\\n');
-                missing.append("\\nChoose the ExeFS folder itself, not the RomFS folder.");
+                        .append(files[1] == null ? "MISSING" : "found").append('\n');
+                missing.append("\nChoose the ExeFS folder itself, not the RomFS folder.");
                 setReport(missing.toString(), false);
                 return;
             }
@@ -137,7 +137,7 @@ public final class MainActivity extends Activity {
                 setReport(report, true);
             }
         } catch (Exception e) {
-            setReport("Stage 1A failed before inspection:\\n" + e, false);
+            setReport("Stage 1A failed before inspection:\n" + e, false);
         } finally {
             chooseButton.setEnabled(true);
         }

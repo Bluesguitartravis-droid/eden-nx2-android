@@ -919,6 +919,175 @@ static uint64_t switch2_counter(void) {
     return (uint64_t)v;
 }
 
+typedef struct {
+    uint64_t base_address;
+    uint64_t size;
+    uint32_t state;
+    uint32_t attribute;
+    uint32_t permission;
+    uint32_t ipc_count;
+    uint32_t device_count;
+    uint32_t padding;
+} HorizonMemoryInfo;
+
+static int range_contains(uint64_t base, uint64_t size, uint64_t addr) {
+    return size && addr >= base && addr < base + size;
+}
+
+static void classify_query_memory(
+        uint64_t addr,
+        uint64_t *base, uint64_t *size,
+        uint32_t *state, uint32_t *perm) {
+    *base = addr & ~0xfffULL;
+    *size = 0x1000;
+    *state = 0;  // Free
+    *perm = 0;
+
+    if (g_guest_stack
+            && range_contains(
+                (uint64_t)(uintptr_t)g_guest_stack,
+                GUEST_STACK_SIZE, addr)) {
+        *base = (uint64_t)(uintptr_t)g_guest_stack;
+        *size = GUEST_STACK_SIZE;
+        *state = 0x0b;  // Stack
+        *perm = 3;      // RW
+        return;
+    }
+
+    if (g_guest_tls
+            && range_contains((uint64_t)(uintptr_t)g_guest_tls, 0x4000, addr)) {
+        *base = (uint64_t)(uintptr_t)g_guest_tls;
+        *size = 0x4000;
+        *state = 0x0c;  // ThreadLocal
+        *perm = 3;
+        return;
+    }
+
+    if (g_guest_tlr
+            && range_contains((uint64_t)(uintptr_t)g_guest_tlr, 0x4000, addr)) {
+        *base = (uint64_t)(uintptr_t)g_guest_tlr;
+        *size = 0x4000;
+        *state = 0x0c;
+        *perm = 3;
+        return;
+    }
+
+    for (int i = 0; i < g_nmod; ++i) {
+        Module *m = &g_mod[i];
+        uint64_t mb = (uint64_t)(uintptr_t)m->base;
+        if (!range_contains(mb, m->map_size, addr)) continue;
+
+        uint64_t off = addr - mb;
+        uint64_t ro = m->ro_off;
+        uint64_t da = m->data_off;
+
+        if (off < ro) {
+            *base = mb;
+            *size = ro;
+            *state = 3;  // Code
+            *perm = 5;   // RX
+        } else if (off < da) {
+            *base = mb + ro;
+            *size = da - ro;
+            *state = 3;  // Code
+            *perm = 1;   // R
+        } else {
+            *base = mb + da;
+            *size = m->map_size - da;
+            *state = 4;  // CodeData
+            *perm = 3;   // RW
+        }
+        return;
+    }
+
+    if (g_heap_region
+            && range_contains(
+                (uint64_t)(uintptr_t)g_heap_region,
+                g_heap_region_size, addr)) {
+        uint64_t hb = (uint64_t)(uintptr_t)g_heap_region;
+        if (addr < hb + g_heap_current) {
+            *base = hb;
+            *size = g_heap_current;
+            *state = 5;  // Heap
+            *perm = 3;
+        } else {
+            *base = hb + g_heap_current;
+            *size = g_heap_region_size - g_heap_current;
+            *state = 0;
+            *perm = 0;
+        }
+        return;
+    }
+
+    if (g_alias_region
+            && range_contains(
+                (uint64_t)(uintptr_t)g_alias_region,
+                g_alias_region_size, addr)) {
+        *base = (uint64_t)(uintptr_t)g_alias_region;
+        *size = g_alias_region_size;
+        *state = 0;
+        *perm = 0;
+        return;
+    }
+
+    if (g_stack_region
+            && range_contains(
+                (uint64_t)(uintptr_t)g_stack_region,
+                g_stack_region_size, addr)) {
+        *base = (uint64_t)(uintptr_t)g_stack_region;
+        *size = g_stack_region_size;
+        *state = 0;
+        *perm = 0;
+        return;
+    }
+
+    if (g_stub_page
+            && range_contains(
+                (uint64_t)(uintptr_t)g_stub_page,
+                g_stub_map_size, addr)) {
+        *base = (uint64_t)(uintptr_t)g_stub_page;
+        *size = g_stub_map_size;
+        *state = 4; // CodeData
+        *perm = 5;  // RX
+        return;
+    }
+}
+
+static int emulate_query_memory(ucontext_t *uc) {
+#if defined(__aarch64__)
+    uint64_t out_info = uc->uc_mcontext.regs[0];
+    uint64_t out_page = uc->uc_mcontext.regs[1];
+    uint64_t addr = uc->uc_mcontext.regs[2];
+
+    if (!out_info) return 0;
+
+    uint64_t base = 0, size = 0;
+    uint32_t state = 0, perm = 0;
+    classify_query_memory(addr, &base, &size, &state, &perm);
+
+    HorizonMemoryInfo mi;
+    memset(&mi, 0, sizeof(mi));
+    mi.base_address = base;
+    mi.size = size;
+    mi.state = state;
+    mi.permission = perm;
+
+    memcpy((void *)(uintptr_t)out_info, &mi, sizeof(mi));
+    if (out_page) {
+        uint32_t page_flags = 0;
+        memcpy((void *)(uintptr_t)out_page, &page_flags, sizeof(page_flags));
+    }
+
+    // Horizon QueryMemory returns Result in x0 and PageInfo flags in x1.
+    uc->uc_mcontext.regs[0] = 0;
+    uc->uc_mcontext.regs[1] = 0;
+    return 1;
+#else
+    (void)uc;
+    return 0;
+#endif
+}
+
 static int emulate_get_info(ucontext_t *uc) {
 #if defined(__aarch64__)
     uint64_t id = uc->uc_mcontext.regs[1];
@@ -1135,6 +1304,13 @@ static void guest_signal_handler(int sig, siginfo_t *si, void *ctx) {
 
         for (int i = 0; i < 8; ++i) g_stop.regs[i] = uc->uc_mcontext.regs[i];
 
+        if (svc == 0x06) { // QueryMemory
+            if (emulate_query_memory(uc)) {
+                uc->uc_mcontext.pc = resume;
+                return;
+            }
+            stop_now(7, sig, 0, trap_pc, uc->uc_mcontext.regs[2], insn);
+        }
         if (svc == 0x01) { // SetHeapSize
             size_t requested = (size_t)uc->uc_mcontext.regs[1];
             size_t page = (size_t)sysconf(_SC_PAGESIZE);
@@ -1284,6 +1460,12 @@ static void report_stop(Out *o) {
             "FIRST_DEPENDENCY=SetHeapSize host_mapping_failure stage=%d "
             "requested=0x%" PRIx64 " errno=%d\n",
             g_stop.arg, g_stop.fault, errno);
+        break;
+    case 7:
+        add(o,
+            "FIRST_DEPENDENCY=QueryMemory host_write_failure "
+            "address=0x%" PRIx64 "\n",
+            g_stop.fault);
         break;
     case 2:
         if (g_stop.arg >= 0 && (unsigned)g_stop.arg < g_nimport) {

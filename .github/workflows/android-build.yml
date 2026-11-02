@@ -12,7 +12,7 @@ on:
         type: boolean
         default: false
   push:
-    branches: [ main, fix/embedded-switch2-npdm ]
+    branches: [ main, fix/embedded-switch2-npdm, feature/fullrun-null-branch-diag ]
     paths:
       - ".github/workflows/android-build.yml"
       - "patches/**"
@@ -131,6 +131,12 @@ jobs:
         run: |
           python3 scripts/apply-embedded-switch2-npdm.py upstream
           grep -n 'Switch 2 program detected from embedded NSP Program NCA NPDM' upstream/src/core/core.cpp
+
+      - name: Add NX2 null branch diagnostics
+        shell: bash
+        run: |
+          python3 scripts/apply-nx2-null-branch-diagnostics.py upstream
+          grep -n 'NX2_BRANCH_FAULT' upstream/src/core/arm/dynarmic/arm_dynarmic_64.cpp
 
       - name: Detect Android build requirements
         id: android_req

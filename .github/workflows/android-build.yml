@@ -12,7 +12,7 @@ on:
         type: boolean
         default: false
   push:
-    branches: [ main, fix/embedded-switch2-npdm, feature/fullrun-null-branch-diag ]
+    branches: [ main, fix/embedded-switch2-npdm, feature/fullrun-null-branch-diag, experiment/fullrun-null-call-bypass ]
     paths:
       - ".github/workflows/android-build.yml"
       - "patches/**"
@@ -137,6 +137,12 @@ jobs:
         run: |
           python3 scripts/apply-nx2-null-branch-diagnostics.py upstream
           grep -n 'NX2_BRANCH_FAULT' upstream/src/core/arm/dynarmic/arm_dynarmic_64.cpp
+
+      - name: Add title-scoped NX2 near-null bypass probe
+        shell: bash
+        run: |
+          python3 scripts/apply-nx2-null-call-bypass.py upstream
+          grep -n 'NX2_NEAR_NULL_BYPASS' upstream/src/core/arm/dynarmic/arm_dynarmic_64.cpp
 
       - name: Detect Android build requirements
         id: android_req

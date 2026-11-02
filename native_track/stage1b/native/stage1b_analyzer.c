@@ -5,11 +5,14 @@
 #include <jni.h>
 #include <errno.h>
 #include <inttypes.h>
+#include <limits.h>
+#include <lz4.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 
@@ -77,72 +80,24 @@ static void stat_print(Out* o, const char* name, const Stat* s) {
     add(o, "\n");
 }
 
-// Small raw LZ4 block decoder for NSO segment payloads.
-// NSO compression stores each segment as a normal LZ4 block with the uncompressed
-// size supplied by the NSO header.
-static int lz4_block_decode(const uint8_t* src, size_t src_size,
-                            uint8_t* dst, size_t dst_size,
-                            size_t* written) {
-    const uint8_t* ip = src;
-    const uint8_t* iend = src + src_size;
-    uint8_t* op = dst;
-    uint8_t* oend = dst + dst_size;
-
-    while (ip < iend) {
-        uint8_t token = *ip++;
-
-        size_t lit_len = token >> 4;
-        if (lit_len == 15) {
-            for (;;) {
-                if (ip >= iend) return 0;
-                uint8_t x = *ip++;
-                lit_len += x;
-                if (x != 255) break;
-            }
-        }
-
-        if ((size_t)(iend - ip) < lit_len || (size_t)(oend - op) < lit_len) return 0;
-        memcpy(op, ip, lit_len);
-        ip += lit_len;
-        op += lit_len;
-
-        if (ip == iend) {
-            *written = (size_t)(op - dst);
-            return op == oend;
-        }
-
-        if ((size_t)(iend - ip) < 2) return 0;
-        size_t offset = (size_t)ip[0] | ((size_t)ip[1] << 8);
-        ip += 2;
-        if (offset == 0 || offset > (size_t)(op - dst)) return 0;
-
-        size_t match_len = token & 0x0f;
-        if (match_len == 15) {
-            for (;;) {
-                if (ip >= iend) return 0;
-                uint8_t x = *ip++;
-                match_len += x;
-                if (x != 255) break;
-            }
-        }
-        match_len += 4;
-
-        if ((size_t)(oend - op) < match_len) return 0;
-        uint8_t* match = op - offset;
-        while (match_len--) *op++ = *match++;
-    }
-
-    *written = (size_t)(op - dst);
-    return op == oend;
-}
-
 static int load_segment(Out* o, int fd, int64_t file_size,
                         uint8_t* image, const char* name,
                         uint32_t file_off, uint32_t mem_off, uint32_t mem_size,
                         uint32_t stored_size, int compressed) {
     size_t input_size = compressed ? stored_size : mem_size;
-    if ((uint64_t)file_off + input_size > (uint64_t)file_size) {
-        add(o, "FAIL decompress_%s: stored bytes exceed NSO file\n", name);
+    uint64_t stored_end = (uint64_t)file_off + input_size;
+
+    add(o,
+        "segment_%s_layout: file_off=0x%x mem_off=0x%x mem_size=0x%x "
+        "stored_size=0x%zx stored_end=0x%" PRIx64 " file_size=0x%" PRIx64 "\n",
+        name, file_off, mem_off, mem_size, input_size, stored_end, (uint64_t)file_size);
+
+    if (stored_end > (uint64_t)file_size) {
+        add(o,
+            "FAIL decompress_%s: stored_end=0x%" PRIx64
+            " exceeds file_size=0x%" PRIx64 " by %" PRIu64 " bytes\n",
+            name, stored_end, (uint64_t)file_size,
+            stored_end - (uint64_t)file_size);
         return 0;
     }
 
@@ -153,6 +108,11 @@ static int load_segment(Out* o, int fd, int64_t file_size,
         }
         add(o, "PASS segment_%s: uncompressed %u bytes\n", name, mem_size);
         return 1;
+    }
+
+    if (input_size > INT_MAX || mem_size > INT_MAX) {
+        add(o, "FAIL decompress_%s: segment too large for LZ4 API\n", name);
+        return 0;
     }
 
     uint8_t* packed = (uint8_t*)malloc(input_size);
@@ -166,18 +126,40 @@ static int load_segment(Out* o, int fd, int64_t file_size,
         return 0;
     }
 
-    size_t written = 0;
-    int ok = lz4_block_decode(packed, input_size, image + mem_off, mem_size, &written);
+    add(o, "segment_%s_first16=", name);
+    size_t preview = input_size < 16 ? input_size : 16;
+    for (size_t i = 0; i < preview; ++i) add(o, "%02x", packed[i]);
+    add(o, "\n");
+
+    int decoded = LZ4_decompress_safe(
+        (const char*)packed,
+        (char*)image + mem_off,
+        (int)input_size,
+        (int)mem_size);
     free(packed);
-    if (!ok) {
-        add(o, "FAIL decompress_%s: LZ4 output=%zu expected=%u\n",
-            name, written, mem_size);
+
+    if (decoded < 0) {
+        add(o, "FAIL decompress_%s: LZ4_decompress_safe returned %d\n", name, decoded);
+        return 0;
+    }
+    if ((uint32_t)decoded != mem_size) {
+        add(o, "FAIL decompress_%s: LZ4 output=%d expected=%u\n",
+            name, decoded, mem_size);
         return 0;
     }
 
     add(o, "PASS segment_%s: LZ4 %zu -> %u bytes\n",
         name, input_size, mem_size);
     return 1;
+}
+
+static int64_t fd_size(int fd) {
+    struct stat st;
+    if (fstat(fd, &st) == 0 && st.st_size > 0) return (int64_t)st.st_size;
+    off_t cur = lseek(fd, 0, SEEK_CUR);
+    off_t end = lseek(fd, 0, SEEK_END);
+    if (cur >= 0) lseek(fd, cur, SEEK_SET);
+    return end >= 0 ? (int64_t)end : -1;
 }
 
 static uint64_t host_cntfrq(void) {
@@ -391,6 +373,15 @@ Java_org_nx2a_stage1b_MainActivity_analyzeExeFs(
         return out;
     }
 
+    int64_t os_main_size = fd_size(main_fd);
+    int64_t effective_main_size = os_main_size > 0 ? os_main_size : (int64_t)main_size;
+    add(&o, "main_size_java=%" PRId64 "\n", (int64_t)main_size);
+    add(&o, "main_size_os=%" PRId64 "\n", os_main_size);
+    if (os_main_size > 0 && (int64_t)main_size > 0 && os_main_size != (int64_t)main_size) {
+        add(&o, "WARN main_size_disagreement=%" PRId64 " bytes\n",
+            os_main_size - (int64_t)main_size);
+    }
+
     uint8_t h[0x100];
     if (!read_exact(main_fd, h, sizeof(h), 0) || memcmp(h, "NSO0", 4) != 0) {
         add(&o, "BLOCKED=main is not a readable NSO0\n");
@@ -415,7 +406,19 @@ Java_org_nx2a_stage1b_MainActivity_analyzeExeFs(
         if (end > image_end) image_end = end;
     }
 
-    add(&o, "nso_file_size=%" PRId64 "\n", (int64_t)main_size);
+    add(&o, "nso_file_size_effective=%" PRId64 "\n", effective_main_size);
+    add(&o, "nso_flags=0x%08x\n", flags);
+    add(&o, "nso_header_segments:\n");
+    const char* header_names[3] = {"text", "ro", "data"};
+    for (int i = 0; i < 3; ++i) {
+        size_t stored = ((flags >> i) & 1) ? csz[i] : sz[i];
+        add(&o,
+            "  %s file_off=0x%x mem_off=0x%x mem_size=0x%x csz=0x%x "
+            "stored_end=0x%" PRIx64 "%s\n",
+            header_names[i], fo[i], mo[i], sz[i], csz[i],
+            (uint64_t)fo[i] + stored,
+            ((uint64_t)fo[i] + stored <= (uint64_t)effective_main_size) ? "" : " OUT_OF_FILE");
+    }
     add(&o, "image_without_bss=0x%" PRIx64 " (%" PRIu64 " bytes)\n",
         image_end, image_end);
     add(&o, "image_with_bss=0x%" PRIx64 "\n", image_end + bss);
@@ -443,7 +446,7 @@ Java_org_nx2a_stage1b_MainActivity_analyzeExeFs(
     const char* names[3] = {"text", "ro", "data"};
     int ok = 1;
     for (int i = 0; i < 3; ++i) {
-        ok &= load_segment(&o, main_fd, (int64_t)main_size, image, names[i],
+        ok &= load_segment(&o, main_fd, effective_main_size, image, names[i],
                            fo[i], mo[i], sz[i], csz[i], (flags >> i) & 1);
     }
     if (!ok) {

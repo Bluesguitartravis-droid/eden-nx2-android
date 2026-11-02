@@ -287,6 +287,7 @@ class SnapshotPackerActivity : AppCompatActivity() {
         val romfs: DocumentFile,
         val mainNpdm: DocumentFile,
         val mainNpdmBytes: ByteArray,
+        val controlNacpBytes: ByteArray?,
         val titleId: Long,
         val version: Int,
         val label: String,
@@ -316,9 +317,22 @@ class SnapshotPackerActivity : AppCompatActivity() {
                     data
                 } ?: error("Unable to read main.npdm")
                 val titleId = readTitleId(npdmBytes)
-                val version = node.name?.toIntOrNull()?.takeIf { it >= 0 } ?: 0
-                val title = cleanTitle(node.name ?: label)
-                out += Snapshot(node, exefs, romfs, npdm, npdmBytes, titleId, version, label, title)
+                if ((titleId and 0x800L) == 0L) {
+                    val controlFile = sequenceOf(
+                        node.findFile("control.nacp"),
+                        node.findFile("control")?.findFile("control.nacp")
+                    ).filterNotNull().firstOrNull { it.isFile && it.length() == 0x4000L }
+                    val controlBytes = controlFile?.let { file ->
+                        openInput(file.uri)?.use { input -> input.readBytes() }
+                            ?.takeIf { it.size == 0x4000 }
+                    }
+                    val version = node.name?.toIntOrNull()?.takeIf { it >= 0 } ?: 0
+                    val title = cleanTitle(node.name ?: label)
+                    out += Snapshot(
+                        node, exefs, romfs, npdm, npdmBytes, controlBytes,
+                        titleId, version, label, title
+                    )
+                }
             }
             if (depth == 4) return
             node.listFiles()
@@ -347,7 +361,7 @@ class SnapshotPackerActivity : AppCompatActivity() {
         }
 
         private fun cleanTitle(name: String): String =
-            name.replace(Regex("\s*\[[^]]*]"), "").trim().ifEmpty { "Extracted game" }
+            name.replace(Regex("""\\s*\\[[^]]*]"""), "").trim().ifEmpty { "Extracted game" }
 
         private fun u32(data: ByteArray, at: Int): Int = ByteBuffer.wrap(data, at, 4)
             .order(ByteOrder.LITTLE_ENDIAN).int
@@ -484,7 +498,7 @@ class SnapshotPackerActivity : AppCompatActivity() {
         }
 
         private fun sanitize(text: String): String = text
-            .replace(Regex("[\\/:*?"<>|]"), "_")
+            .replace(Regex("""[\\/:*?"<>|]"""), "_")
             .trim()
             .take(96)
             .ifEmpty { "Extracted game" }
@@ -498,20 +512,37 @@ class SnapshotPackerActivity : AppCompatActivity() {
         }
 
         private fun controlData(snapshot: Snapshot, title: String): ByteArray {
-            val nacp = ByteArray(0x4000)
-            repeat(16) { index ->
-                putUtf8(nacp, index * 0x300, 0x200, title)
+            val existing = snapshot.controlNacpBytes
+            val nacp = existing?.copyOf() ?: ByteArray(0x4000)
+
+            // Preserve compressed/localized control metadata. For ordinary uncompressed metadata,
+            // update only the visible title/version fields just like NSP Box.
+            if (existing == null || nacp[0x3215].toInt() == 0) {
+                repeat(16) { index ->
+                    putUtf8(nacp, index * 0x300, 0x200, title)
+                }
             }
-            nacp[0x3025] = 1
-            putInt(nacp, 0x302c, 0xffff)
-            putLong(nacp, 0x3038, snapshot.titleId)
-            putLong(nacp, 0x3070, snapshot.titleId + 0x1000)
-            putLong(nacp, 0x3078, snapshot.titleId)
-            if ((snapshot.titleId ushr 56) == 4L) {
-                nacp[0x3214] = 3
-                nacp[0x3217] = 1
+
+            if (existing == null) {
+                nacp[0x3025] = 1
+                putInt(nacp, 0x302c, 0xffff)
+                putLong(nacp, 0x3038, snapshot.titleId)
+                putLong(nacp, 0x3070, snapshot.titleId + 0x1000)
+                putLong(nacp, 0x3078, snapshot.titleId)
+                if ((snapshot.titleId ushr 56) == 4L) {
+                    nacp[0x3214] = 3
+                    nacp[0x3217] = 1
+                }
             }
-            putUtf8(nacp, 0x3060, 0x10, if (snapshot.version == 0) "1.0.0" else snapshot.version.toString())
+
+            // The display version field is always safe to refresh.
+            nacp.fill(0, 0x3060, 0x3070)
+            putUtf8(
+                nacp,
+                0x3060,
+                0x10,
+                if (snapshot.version == 0) "1.0.0" else snapshot.version.toString()
+            )
             return nacp
         }
 

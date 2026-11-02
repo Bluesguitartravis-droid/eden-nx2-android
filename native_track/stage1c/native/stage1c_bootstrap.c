@@ -49,7 +49,10 @@
 #define REPORT_CAP 131072
 #define STUB_BYTES (MAX_IMPORTS * 8)
 #define GUEST_STACK_SIZE (2u << 20)
-#define NX2_REGION_SIZE (8ull << 30)
+#define HEAP_REGION_SIZE  (12ull << 30)
+#define ALIAS_REGION_MAX   (64ull << 30)
+#define ALIAS_REGION_MIN   (16ull << 30)
+#define STACK_REGION_SIZE  (2ull << 30)
 
 enum {
     TR_TPIDR_R = 0x1000,
@@ -131,8 +134,22 @@ static uint8_t *g_guest_tls;
 static uint8_t *g_guest_tlr;
 static uint8_t *g_guest_stack;
 static void *g_guest_stack_top;
+static uint8_t *g_heap_region;
+static size_t g_heap_region_size;
+static size_t g_heap_current;
+
+static uint8_t *g_alias_region;
+static size_t g_alias_region_size;
+
+static uint8_t *g_stack_region;
+static size_t g_stack_region_size;
+
 static uint8_t *g_nx2_region;
 static size_t g_nx2_region_size;
+
+static uint64_t g_aslr_region_addr;
+static uint64_t g_aslr_region_size;
+
 static _Alignas(0x1000) uint8_t g_user_exception_ctx[0x1000];
 static volatile sig_atomic_t g_getinfo_hits[64];
 
@@ -203,6 +220,102 @@ static size_t align_up(size_t n, size_t a) {
 
 static uintptr_t align_down_ptr(uintptr_t n, size_t a) {
     return n & ~(uintptr_t)(a - 1);
+}
+
+static void *reserve_aligned_sparse(size_t size, size_t alignment) {
+    if (!size || !alignment || (alignment & (alignment - 1))) return MAP_FAILED;
+
+    size_t total;
+    if (__builtin_add_overflow(size, alignment, &total)) return MAP_FAILED;
+
+    uint8_t *raw = (uint8_t *)mmap(
+        NULL, total,
+        PROT_NONE,
+        MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE,
+        -1, 0);
+    if (raw == MAP_FAILED) return MAP_FAILED;
+
+    uintptr_t aligned =
+        ((uintptr_t)raw + alignment - 1) & ~(uintptr_t)(alignment - 1);
+    size_t prefix = (size_t)(aligned - (uintptr_t)raw);
+    size_t suffix = total - prefix - size;
+
+    if (prefix) munmap(raw, prefix);
+    if (suffix) munmap((void *)(aligned + size), suffix);
+
+    return (void *)aligned;
+}
+
+static int reserve_guest_geometry(Out *o) {
+    const size_t G = 1ull << 30;
+
+    g_heap_region_size = HEAP_REGION_SIZE;
+    g_heap_region = (uint8_t *)reserve_aligned_sparse(g_heap_region_size, G);
+    if (g_heap_region == MAP_FAILED) {
+        g_heap_region = NULL;
+        add(o, "FAIL guest_heap_reserve size=0x%zx errno=%d\n",
+            g_heap_region_size, errno);
+        return 0;
+    }
+
+    g_stack_region_size = STACK_REGION_SIZE;
+    g_stack_region = (uint8_t *)reserve_aligned_sparse(g_stack_region_size, G);
+    if (g_stack_region == MAP_FAILED) {
+        g_stack_region = NULL;
+        add(o, "FAIL guest_stack_region_reserve size=0x%zx errno=%d\n",
+            g_stack_region_size, errno);
+        return 0;
+    }
+
+    for (size_t want = ALIAS_REGION_MAX; want >= ALIAS_REGION_MIN; want >>= 1) {
+        g_alias_region = (uint8_t *)reserve_aligned_sparse(want, G);
+        if (g_alias_region != MAP_FAILED) {
+            g_alias_region_size = want;
+            break;
+        }
+        g_alias_region = NULL;
+        if (want == ALIAS_REGION_MIN) break;
+    }
+    if (!g_alias_region) {
+        add(o, "FAIL guest_alias_reserve min=0x%llx errno=%d\n",
+            (unsigned long long)ALIAS_REGION_MIN, errno);
+        return 0;
+    }
+
+    // Match the current Eglantine Switch 2 bring-up model: the NX2/VAMM region
+    // occupies the upper half of the alias region and MapPhysicalMemory will
+    // eventually commit pages inside it.
+    g_nx2_region = g_alias_region + g_alias_region_size / 2;
+    g_nx2_region_size = g_alias_region_size / 2;
+
+    // The native loader maps NSOs at host addresses. Advertise a compact ASLR
+    // window which actually contains those mappings instead of a fictitious
+    // console address range.
+    uint64_t lo = UINT64_MAX;
+    uint64_t hi = 0;
+    for (int i = 0; i < g_nmod; ++i) {
+        uint64_t b = (uint64_t)(uintptr_t)g_mod[i].base;
+        uint64_t e = b + g_mod[i].map_size;
+        if (b < lo) lo = b;
+        if (e > hi) hi = e;
+    }
+    if (lo != UINT64_MAX) {
+        lo = (uint64_t)align_down_ptr((uintptr_t)lo, G);
+        hi = (uint64_t)align_up((size_t)hi, G);
+        g_aslr_region_addr = lo;
+        g_aslr_region_size = hi - lo;
+    }
+
+    add(o,
+        "guest_geometry heap=%p+0x%zx alias=%p+0x%zx "
+        "stack=%p+0x%zx nx2=%p+0x%zx aslr=0x%" PRIx64 "+0x%" PRIx64 "\n",
+        g_heap_region, g_heap_region_size,
+        g_alias_region, g_alias_region_size,
+        g_stack_region, g_stack_region_size,
+        g_nx2_region, g_nx2_region_size,
+        g_aslr_region_addr, g_aslr_region_size);
+
+    return 1;
 }
 
 static int read_exact(int fd, void *dst, size_t n, off_t off) {
@@ -819,6 +932,22 @@ static int emulate_get_info(ucontext_t *uc) {
     case 0:   // CoreMask: this title's NPDM declares cores 0..5.
         value = 0x3f;
         break;
+    case 2:   // AliasRegionAddress
+        if (g_alias_region) value = (uint64_t)(uintptr_t)g_alias_region;
+        else handled = 0;
+        break;
+    case 3:   // AliasRegionSize
+        if (g_alias_region) value = g_alias_region_size;
+        else handled = 0;
+        break;
+    case 4:   // HeapRegionAddress
+        if (g_heap_region) value = (uint64_t)(uintptr_t)g_heap_region;
+        else handled = 0;
+        break;
+    case 5:   // HeapRegionSize
+        if (g_heap_region) value = g_heap_region_size;
+        else handled = 0;
+        break;
     case 8:   // DebuggerAttached
         value = 0;
         break;
@@ -833,6 +962,26 @@ static int emulate_get_info(ucontext_t *uc) {
         else handled = 0;
         break;
     }
+    case 12:  // AslrRegionAddress
+        if (g_aslr_region_size) value = g_aslr_region_addr;
+        else handled = 0;
+        break;
+    case 13:  // AslrRegionSize
+        if (g_aslr_region_size) value = g_aslr_region_size;
+        else handled = 0;
+        break;
+    case 14:  // StackRegionAddress
+        if (g_stack_region) value = (uint64_t)(uintptr_t)g_stack_region;
+        else handled = 0;
+        break;
+    case 15:  // StackRegionSize
+        if (g_stack_region) value = g_stack_region_size;
+        else handled = 0;
+        break;
+    case 16:  // SystemResourceSizeTotal: NPDM declared zero.
+    case 17:  // SystemResourceSizeUsed
+        value = 0;
+        break;
     case 18:  // ProgramId
         value = EXPECT_TITLE_ID;
         break;
@@ -986,6 +1135,42 @@ static void guest_signal_handler(int sig, siginfo_t *si, void *ctx) {
 
         for (int i = 0; i < 8; ++i) g_stop.regs[i] = uc->uc_mcontext.regs[i];
 
+        if (svc == 0x01) { // SetHeapSize
+            size_t requested = (size_t)uc->uc_mcontext.regs[1];
+            size_t page = (size_t)sysconf(_SC_PAGESIZE);
+            size_t old_aligned = align_up(g_heap_current, page);
+            size_t new_aligned = align_up(requested, page);
+
+            if (!g_heap_region || requested > g_heap_region_size) {
+                stop_now(6, sig, 1, trap_pc, requested, insn);
+            }
+
+            if (new_aligned > old_aligned) {
+                if (mprotect(
+                        g_heap_region + old_aligned,
+                        new_aligned - old_aligned,
+                        PROT_READ | PROT_WRITE) != 0) {
+                    stop_now(6, sig, 2, trap_pc, requested, insn);
+                }
+            } else if (new_aligned < old_aligned) {
+                madvise(
+                    g_heap_region + new_aligned,
+                    old_aligned - new_aligned,
+                    MADV_DONTNEED);
+                if (mprotect(
+                        g_heap_region + new_aligned,
+                        old_aligned - new_aligned,
+                        PROT_NONE) != 0) {
+                    stop_now(6, sig, 3, trap_pc, requested, insn);
+                }
+            }
+
+            g_heap_current = requested;
+            uc->uc_mcontext.regs[0] = 0;
+            uc->uc_mcontext.regs[1] = (uint64_t)(uintptr_t)g_heap_region;
+            uc->uc_mcontext.pc = resume;
+            return;
+        }
         if (svc == 0x1e) { // GetSystemTick
             uc->uc_mcontext.regs[0] = 0;
             uc->uc_mcontext.regs[1] = switch2_counter();
@@ -1094,6 +1279,12 @@ static void report_stop(Out *o) {
             " x2(handle)=0x%" PRIx64 " x3(subid)=0x%" PRIx64 "\n",
             g_stop.regs[0], g_stop.regs[1], g_stop.regs[2], g_stop.regs[3]);
         break;
+    case 6:
+        add(o,
+            "FIRST_DEPENDENCY=SetHeapSize host_mapping_failure stage=%d "
+            "requested=0x%" PRIx64 " errno=%d\n",
+            g_stop.arg, g_stop.fault, errno);
+        break;
     case 2:
         if (g_stop.arg >= 0 && (unsigned)g_stop.arg < g_nimport) {
             add(o, "FIRST_DEPENDENCY=unresolved_import %s\n",
@@ -1179,9 +1370,23 @@ static void cleanup(void) {
     g_guest_stack = NULL;
     g_guest_stack_top = NULL;
 
-    if (g_nx2_region) munmap(g_nx2_region, g_nx2_region_size);
+    if (g_heap_region) munmap(g_heap_region, g_heap_region_size);
+    g_heap_region = NULL;
+    g_heap_region_size = 0;
+    g_heap_current = 0;
+
+    if (g_alias_region) munmap(g_alias_region, g_alias_region_size);
+    g_alias_region = NULL;
+    g_alias_region_size = 0;
+
+    if (g_stack_region) munmap(g_stack_region, g_stack_region_size);
+    g_stack_region = NULL;
+    g_stack_region_size = 0;
+
     g_nx2_region = NULL;
     g_nx2_region_size = 0;
+    g_aslr_region_addr = 0;
+    g_aslr_region_size = 0;
 
     free(g_guest_tls);
     free(g_guest_tlr);
@@ -1286,15 +1491,8 @@ Java_org_nx2a_stage1c_MainActivity_runBootstrap(
         (void *)align_down_ptr(
             (uintptr_t)(g_guest_stack + GUEST_STACK_SIZE - 16), 16);
 
-    g_nx2_region_size = NX2_REGION_SIZE;
-    g_nx2_region = (uint8_t *)mmap(
-        NULL, g_nx2_region_size,
-        PROT_NONE,
-        MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE,
-        -1, 0);
-    if (g_nx2_region == MAP_FAILED) {
-        g_nx2_region = NULL;
-        add(&o, "STAGE1C_RESULT=BLOCKED_NX2_REGION_RESERVATION errno=%d\n", errno);
+    if (!reserve_guest_geometry(&o)) {
+        add(&o, "STAGE1C_RESULT=BLOCKED_GUEST_GEOMETRY\n");
         goto done;
     }
 
@@ -1302,9 +1500,6 @@ Java_org_nx2a_stage1c_MainActivity_runBootstrap(
 
     add(&o, "guest_tls_seed=%p guest_tlr_seed=%p guest_stack_top=%p\n",
         g_guest_tls, g_guest_tlr, g_guest_stack_top);
-    add(&o, "nx2_vamm_region=%p size=0x%zx (%.2f GiB sparse reserve)\n",
-        g_nx2_region, g_nx2_region_size,
-        (double)g_nx2_region_size / 1073741824.0);
 
     SignalGuard guard;
     if (!signal_guard_install(&guard)) {

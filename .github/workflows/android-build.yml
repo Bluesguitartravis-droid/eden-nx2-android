@@ -17,6 +17,7 @@ on:
       - ".github/workflows/android-build.yml"
       - "patches/**"
       - "scripts/**"
+      - "android_overlay/**"
       - "README.md"
       - "docs/**"
 

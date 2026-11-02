@@ -317,27 +317,58 @@ class SnapshotPackerActivity : AppCompatActivity() {
     private class SnapshotScanner(private val openInput: (Uri) -> InputStream?) {
         fun findBest(root: DocumentFile): Snapshot {
             val candidates = mutableListOf<Snapshot>()
-            scan(root, root.name ?: "Selected folder", 0, candidates)
+            val invalid = mutableListOf<String>()
+            val rootLabel = root.name ?: "Selected folder"
+            val rootTitle = cleanTitle(rootLabel)
+            val rootVersion = root.name?.toIntOrNull()?.takeIf { it >= 0 } ?: 0
+            scan(root, rootLabel, 0, rootVersion, rootTitle, candidates, invalid)
             if (candidates.isEmpty()) {
-                error("No complete snapshot found. Choose a folder containing exefs/main, exefs/main.npdm and romfs/.")
+                val detail = invalid.firstOrNull()?.let { "\n$it" }.orEmpty()
+                error(
+                    "No complete snapshot found. Choose a folder containing exefs/main, " +
+                        "exefs/main.npdm and romfs/." + detail
+                )
             }
             return candidates.maxWith(compareBy<Snapshot> { it.version }.thenBy { it.label })
         }
 
-        private fun scan(node: DocumentFile, label: String, depth: Int, out: MutableList<Snapshot>) {
+        private fun scan(
+            node: DocumentFile,
+            label: String,
+            depth: Int,
+            inheritedVersion: Int,
+            rootTitle: String,
+            out: MutableList<Snapshot>,
+            invalid: MutableList<String>
+        ) {
             if (depth > 4 || !node.isDirectory) return
             val exefs = node.findFile("exefs")
             val romfs = node.findFile("romfs")
             val main = exefs?.findFile("main")
             val npdm = exefs?.findFile("main.npdm")
-            if (exefs?.isDirectory == true && romfs?.isDirectory == true && main?.isFile == true && npdm?.isFile == true) {
-                val npdmBytes = openInput(npdm.uri)?.use { input ->
-                    val data = input.readBytes()
-                    if (data.size > 4 * 1024 * 1024) error("main.npdm is unexpectedly large")
-                    data
-                } ?: error("Unable to read main.npdm")
-                val titleId = readTitleId(npdmBytes)
-                if ((titleId and 0x800L) == 0L) {
+            val nodeVersion = node.name?.toIntOrNull()?.takeIf { it >= 0 } ?: inheritedVersion
+
+            if (
+                exefs?.isDirectory == true &&
+                romfs?.isDirectory == true &&
+                main?.isFile == true &&
+                npdm?.isFile == true
+            ) {
+                try {
+                    val npdmBytes = openInput(npdm.uri)?.use { input ->
+                        val data = input.readBytes()
+                        if (data.size > 4 * 1024 * 1024) {
+                            error("main.npdm is unexpectedly large")
+                        }
+                        data
+                    } ?: error("Unable to read main.npdm")
+                    val titleId = readTitleId(npdmBytes)
+
+                    // A title ID with the patch bit is not a standalone application snapshot.
+                    if ((titleId and 0x800L) != 0L) {
+                        error("NPDM identifies a patch, not a main application")
+                    }
+
                     val controlFile = sequenceOf(
                         node.findFile("control.nacp"),
                         node.findFile("control")?.findFile("control.nacp")
@@ -346,25 +377,54 @@ class SnapshotPackerActivity : AppCompatActivity() {
                         openInput(file.uri)?.use { input -> input.readBytes() }
                             ?.takeIf { it.size == 0x4000 }
                     }
-                    val version = node.name?.toIntOrNull()?.takeIf { it >= 0 } ?: 0
-                    val title = cleanTitle(node.name ?: label)
+
                     out += Snapshot(
-                        node, exefs, romfs, npdm, npdmBytes, controlBytes,
-                        titleId, version, label, title
+                        node,
+                        exefs,
+                        romfs,
+                        npdm,
+                        npdmBytes,
+                        controlBytes,
+                        titleId,
+                        nodeVersion,
+                        label,
+                        rootTitle
                     )
+                } catch (error: Exception) {
+                    invalid += "$label: ${error.message ?: error::class.java.simpleName}"
                 }
             }
+
             if (depth == 4) return
             node.listFiles()
-                .filter { it.isDirectory && it.name?.lowercase(Locale.ROOT) !in setOf("exefs", "romfs", "control", "dlc", "aoc", "addons", "add_on_content") }
+                .filter {
+                    it.isDirectory &&
+                        it.name?.lowercase(Locale.ROOT) !in setOf(
+                            "exefs", "romfs", "control", "dlc", "aoc",
+                            "addons", "add_on_content"
+                        )
+                }
                 .sortedBy { it.name?.lowercase(Locale.ROOT) }
                 .forEach { child ->
-                    scan(child, "$label/${child.name ?: "folder"}", depth + 1, out)
+                    val childVersion =
+                        child.name?.toIntOrNull()?.takeIf { it >= 0 } ?: nodeVersion
+                    scan(
+                        child,
+                        "$label/${child.name ?: "folder"}",
+                        depth + 1,
+                        childVersion,
+                        rootTitle,
+                        out,
+                        invalid
+                    )
                 }
         }
 
         private fun readTitleId(data: ByteArray): Long {
-            require(data.size >= 0x80 && data.copyOfRange(0, 4).contentEquals("META".toByteArray())) {
+            require(
+                data.size >= 0x80 &&
+                    data.copyOfRange(0, 4).contentEquals("META".toByteArray())
+            ) {
                 "main.npdm is not a supported NPDM file"
             }
             val offset = u32(data, 0x70)
@@ -372,7 +432,9 @@ class SnapshotPackerActivity : AppCompatActivity() {
             require(offset >= 0x80 && size >= 0x20 && offset + size <= data.size) {
                 "The NPDM application metadata is incomplete"
             }
-            require(data.copyOfRange(offset, offset + 4).contentEquals("ACI0".toByteArray())) {
+            require(
+                data.copyOfRange(offset, offset + 4).contentEquals("ACI0".toByteArray())
+            ) {
                 "The NPDM ACI0 section is missing"
             }
             val titleId = u64(data, offset + 0x10)
@@ -381,13 +443,15 @@ class SnapshotPackerActivity : AppCompatActivity() {
         }
 
         private fun cleanTitle(name: String): String =
-            name.replace(Regex("""\s*\[[^]]*]"""), "").trim().ifEmpty { "Extracted game" }
+            name.replace(Regex("""\s*\[[^]]*]"""), "")
+                .trim()
+                .ifEmpty { "Extracted game" }
 
-        private fun u32(data: ByteArray, at: Int): Int = ByteBuffer.wrap(data, at, 4)
-            .order(ByteOrder.LITTLE_ENDIAN).int
+        private fun u32(data: ByteArray, at: Int): Int =
+            ByteBuffer.wrap(data, at, 4).order(ByteOrder.LITTLE_ENDIAN).int
 
-        private fun u64(data: ByteArray, at: Int): Long = ByteBuffer.wrap(data, at, 8)
-            .order(ByteOrder.LITTLE_ENDIAN).long
+        private fun u64(data: ByteArray, at: Int): Long =
+            ByteBuffer.wrap(data, at, 8).order(ByteOrder.LITTLE_ENDIAN).long
     }
 
     private class PlaintextNspPacker(

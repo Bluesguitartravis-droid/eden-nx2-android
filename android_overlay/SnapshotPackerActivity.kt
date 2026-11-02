@@ -361,7 +361,7 @@ class SnapshotPackerActivity : AppCompatActivity() {
         }
 
         private fun cleanTitle(name: String): String =
-            name.replace(Regex("""\\s*\\[[^]]*]"""), "").trim().ifEmpty { "Extracted game" }
+            name.replace(Regex("""\s*\[[^]]*]"""), "").trim().ifEmpty { "Extracted game" }
 
         private fun u32(data: ByteArray, at: Int): Int = ByteBuffer.wrap(data, at, 4)
             .order(ByteOrder.LITTLE_ENDIAN).int

@@ -12,11 +12,12 @@ on:
         type: boolean
         default: false
   push:
-    branches: [ main, feature/sx2a-pokedinner-base ]
+    branches: [ main, feature/plaintext-nsp-packer ]
     paths:
       - ".github/workflows/android-build.yml"
       - "patches/**"
       - "scripts/**"
+      - "android_overlay/**"
       - "README.md"
       - "docs/**"
 
@@ -90,6 +91,14 @@ jobs:
           grep -n 'ENABLE_UPDATE_CHECKER=ON' upstream/src/android/app/build.gradle.kts
           grep -n -A8 'NX2 Android fork update feed' upstream/CMakeModules/GenerateSCMRev.cmake
 
+      - name: Add extracted snapshot NSP packer
+        shell: bash
+        run: |
+          python3 scripts/apply-snapshot-packer.py upstream
+          test -f upstream/src/android/app/src/main/java/org/yuzu/yuzu_emu/features/packer/SnapshotPackerActivity.kt
+          grep -n 'R.string.snapshot_packer' upstream/src/android/app/src/main/java/org/yuzu/yuzu_emu/fragments/HomeSettingsFragment.kt
+          grep -n 'SnapshotPackerActivity' upstream/src/android/app/src/main/AndroidManifest.xml
+
       - name: Detect Android build requirements
         id: android_req
         shell: bash
@@ -118,6 +127,16 @@ jobs:
           ./gradlew --version
           ./gradlew tasks --all > "$GITHUB_WORKSPACE/gradle-tasks.txt"
           grep -E "assemble.*(Standard|Release|Debug)" "$GITHUB_WORKSPACE/gradle-tasks.txt" | head -n 80 || true
+
+      - name: Kotlin compile preflight
+        shell: bash
+        working-directory: upstream/src/android
+        run: |
+          set -o pipefail
+          # CMake configure stages SDL's Java sources into externals/generated/sdl/java.
+          # It is fast compared with the full 1,700+ object native build.
+          ./gradlew 'app:configureCMakeRelWithDebInfo[arm64-v8a]' --stacktrace --no-daemon 2>&1 | tee "$GITHUB_WORKSPACE/android-build.log"
+          ./gradlew app:compileMainlineReleaseKotlin --stacktrace --no-daemon 2>&1 | tee -a "$GITHUB_WORKSPACE/android-build.log"
 
       - name: Build standard ARM64 APK
         shell: bash
@@ -158,9 +177,9 @@ jobs:
             body="$(cat | head -c 60000 | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | awk 'BEGIN{ORS="%0A"}{print}')"
             [ -n "$body" ] && echo "::error title=$1::$body"
           }
-          grep -nE "error:|Error:|FAILED|What went wrong|CMake Error|undefined reference|fatal error|> Task .* FAILED|Could not|not found" "$LOG" | head -n 150 | emit build-errors
-          grep -nA40 "What went wrong" "$LOG" | head -n 120 | emit what-went-wrong
-          grep -nB5 -A25 "CMake Error" "$LOG" | head -n 150 | emit cmake-error
+          (grep -nE "error:|Error:|FAILED|What went wrong|CMake Error|undefined reference|fatal error|> Task .* FAILED|Could not|not found" "$LOG" || true) | head -n 150 | emit build-errors
+          (grep -nA40 "What went wrong" "$LOG" || true) | head -n 120 | emit what-went-wrong
+          (grep -nB5 -A25 "CMake Error" "$LOG" || true) | head -n 150 | emit cmake-error
           tail -n 120 "$LOG" | emit log-tail
 
       - name: Collect build metadata

@@ -12,7 +12,7 @@ on:
         type: boolean
         default: false
   push:
-    branches: [ main, fix/embedded-switch2-npdm, feature/fullrun-null-branch-diag ]
+    branches: [ main, fix/embedded-switch2-npdm, feature/fullrun-null-branch-diag, experiment/sx2a-v032-null-diag ]
     paths:
       - ".github/workflows/android-build.yml"
       - "patches/**"
@@ -50,7 +50,7 @@ jobs:
             fi
             sleep 15
           done
-          if [ "$ok" = 1 ] && ! git -C "$W/upstream" checkout -q 904bfa266c23814660336db6bb0e87caf1c15305 >> "$W/clone.log" 2>&1; then
+          if [ "$ok" = 1 ] && ! git -C "$W/upstream" checkout -q dd3cb327c79f511830e460b916a45a33b5738759 >> "$W/clone.log" 2>&1; then
             echo "pinned commit missing; inspecting branch HEAD" >> "$W/clone.log"
           fi
           if [ "$ok" = 1 ]; then
@@ -88,7 +88,7 @@ jobs:
         run: |
           git clone --recursive --branch nx2-android --single-branch \
             https://git.eden-emu.dev/moceure/eden-nx2-android.git upstream
-          git -C upstream checkout 904bfa266c23814660336db6bb0e87caf1c15305
+          git -C upstream checkout dd3cb327c79f511830e460b916a45a33b5738759
           git -C upstream submodule update --init --recursive
           echo "NX2_COMMIT=$(git -C upstream rev-parse HEAD)" >> "$GITHUB_ENV"
           echo "NX2_UPSTREAM=moceure/eden-nx2-android" >> "$GITHUB_ENV"

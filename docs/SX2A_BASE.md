@@ -7,10 +7,15 @@ baseline to moceure's Android-focused NX2 work built on PokeDinner.
 
 - Repository: `https://git.eden-emu.dev/moceure/eden-nx2-android.git`
 - Branch: `nx2-android`
-- Pinned commit: `ee1e9a0e408f2725baf15f7ca2246e746f31b849`
+- Pinned commit: `904bfa266c23814660336db6bb0e87caf1c15305`
 - Lineage: PokeDinner / Eglantine / Eden-NS2 / Takoroka / Eden
 
 The exact commit is pinned so an APK can be reproduced even when upstream moves.
+
+On 2026-11-02 upstream rewrote its history (every commit ID changed) and marked the
+project unmaintained. The old pin `ee1e9a0e408f2725baf15f7ca2246e746f31b849` no longer
+exists; the `nx2-android-v0.3.1` tag now points to `904bfa266c23814660336db6bb0e87caf1c15305`.
+Upstream also published `nx2-android-v0.3.2` (`dd3cb327c79f511830e460b916a45a33b5738759`).
 
 ## What we keep from this repository
 

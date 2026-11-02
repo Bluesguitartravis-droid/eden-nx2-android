@@ -126,11 +126,10 @@ jobs:
           grep -n 'R.string.snapshot_packer' upstream/src/android/app/src/main/java/org/yuzu/yuzu_emu/fragments/HomeSettingsFragment.kt
           grep -n 'SnapshotPackerActivity' upstream/src/android/app/src/main/AndroidManifest.xml
 
-      - name: Add embedded Switch 2 NPDM detection
+      - name: Use upstream Switch 2 detection
         shell: bash
         run: |
-          python3 scripts/apply-embedded-switch2-npdm.py upstream
-          grep -n 'Switch 2 program detected from embedded NSP Program NCA NPDM' upstream/src/core/core.cpp
+          echo "SX2A v0.3.2 detection path retained; loose ExeFS testing does not require the older NSP overlay."
 
       - name: Add NX2 null branch diagnostics
         shell: bash

@@ -175,6 +175,7 @@ static IpcSession g_ipc_sessions[MAX_IPC_SESSIONS];
 static unsigned g_ipc_session_count;
 static uint32_t g_next_ipc_handle = 0x200;
 static int g_sm_initialized;
+static uint32_t g_pointer_buffer_size = 0x10000;
 static char g_ipc_stop_service[16];
 static uint32_t g_ipc_stop_command;
 static uint32_t g_ipc_stop_type;
@@ -1102,6 +1103,33 @@ static void ipc_reply_success(uint32_t *b, const IpcParsed *p) {
     }
 }
 
+
+static void ipc_reply_success_u16(
+        uint32_t *b, const IpcParsed *p, uint16_t value) {
+    memset(b, 0, 0x100);
+    if (p->tipc) {
+        b[0] = p->type;
+        b[1] = 2;
+        b[2] = 0;
+        b[3] = value;
+    } else {
+        b[0] = 0;
+        b[1] = 12; // ResponseBuilder normal_params_size=3
+        b[4] = 0x4f434653u; // SFCO
+        b[5] = 0;
+        b[6] = 0;
+        b[7] = 0;
+        b[8] = value;
+    }
+}
+
+static uint32_t ipc_clone_session(uint32_t handle) {
+    if (handle == SM_SESSION_HANDLE) return SM_SESSION_HANDLE;
+    IpcSession *s = ipc_find(handle);
+    if (!s) return 0;
+    return ipc_open_service(s->name);
+}
+
 static void ipc_reply_move_handle(
         uint32_t *b, const IpcParsed *p, uint32_t handle) {
     memset(b, 0, 0x100);
@@ -1147,6 +1175,75 @@ static int ipc_sm_request(uint32_t *b, const IpcParsed *p) {
         uint32_t h = ipc_open_service(name);
         if (!h) return 0;
         ipc_reply_move_handle(b, p, h);
+        return 1;
+    }
+
+    return 0;
+}
+
+
+static int ipc_control_request(
+        uint32_t handle, uint32_t *b, const IpcParsed *p) {
+    // HIPC Control / ControlWithContext commands operate on the session itself.
+    switch (p->command) {
+    case 2: // DuplicateSession
+    case 4: { // DuplicateSessionEx
+        uint32_t h = ipc_clone_session(handle);
+        if (!h) return 0;
+        ipc_reply_move_handle(b, p, h);
+        return 1;
+    }
+    case 3: // QueryPointerBufferSize
+        ipc_reply_success_u16(b, p, (uint16_t)g_pointer_buffer_size);
+        return 1;
+    case 5: // SetPointerBufferSize (newer Horizon)
+        if (p->params_word < 64) {
+            uint32_t requested = b[p->params_word];
+            g_pointer_buffer_size = requested > 0xffffu ? 0xffffu : requested;
+            ipc_reply_success(b, p);
+            return 1;
+        }
+        return 0;
+    default:
+        return 0;
+    }
+}
+
+static int ipc_service_request(
+        IpcSession *session, uint32_t *b, const IpcParsed *p) {
+    if (!session) return 0;
+
+    if (!strcmp(session->name, "lm")) {
+        if (p->command == 0) { // LM::OpenLogger
+            uint32_t h = ipc_open_service("ILogger");
+            if (!h) return 0;
+            ipc_reply_move_handle(b, p, h);
+            return 1;
+        }
+        return 0;
+    }
+
+    if (!strcmp(session->name, "ILogger")) {
+        switch (p->command) {
+        case 0: // Log
+        case 1: // SetDestination
+        case 2: // TransmitHashedLog (20.0.0+)
+        case 3: // DevNotify (20.0.0+)
+            ipc_reply_success(b, p);
+            return 1;
+        case 11: { // Unknown11 returns another interface in current Eden
+            uint32_t h = ipc_open_service("ILogger11");
+            if (!h) return 0;
+            ipc_reply_move_handle(b, p, h);
+            return 1;
+        }
+        default:
+            return 0;
+        }
+    }
+
+    if (!strcmp(session->name, "ILogger11")) {
+        ipc_reply_success(b, p);
         return 1;
     }
 
@@ -1857,6 +1954,14 @@ static void guest_signal_handler(int sig, siginfo_t *si, void *ctx) {
                 stop_now(9, sig, 0x21, trap_pc, handle, insn);
             }
 
+            if (p.type == 5 || p.type == 7) { // Control / ControlWithContext
+                if (ipc_control_request(handle, b, &p)) {
+                    uc->uc_mcontext.regs[0] = 0;
+                    uc->uc_mcontext.pc = resume;
+                    return;
+                }
+            }
+
             if (handle == SM_SESSION_HANDLE) {
                 if (ipc_sm_request(b, &p)) {
                     uc->uc_mcontext.regs[0] = 0;
@@ -1869,6 +1974,11 @@ static void guest_signal_handler(int sig, siginfo_t *si, void *ctx) {
 
             IpcSession *session = ipc_find(handle);
             if (session) {
+                if (ipc_service_request(session, b, &p)) {
+                    uc->uc_mcontext.regs[0] = 0;
+                    uc->uc_mcontext.pc = resume;
+                    return;
+                }
                 ipc_capture_stop(session->name, &p, b);
                 stop_now(9, sig, 0x21, trap_pc, handle, insn);
             }
@@ -2194,6 +2304,7 @@ Java_org_nx2a_stage1c_MainActivity_runBootstrap(
     g_ipc_session_count = 0;
     g_next_ipc_handle = 0x200;
     g_sm_initialized = 0;
+    g_pointer_buffer_size = 0x10000;
     memset(g_ipc_stop_service, 0, sizeof(g_ipc_stop_service));
     g_ipc_stop_command = 0;
     g_ipc_stop_type = 0;
@@ -2206,7 +2317,7 @@ Java_org_nx2a_stage1c_MainActivity_runBootstrap(
     Out o = {report, REPORT_CAP};
 
     add(&o, "NX2 Switch 2 Native Stage 1C Controlled Bootstrap\n");
-    add(&o, "harness_build=8\n");
+    add(&o, "harness_build=9\n");
     add(&o, "guest_execution=yes\n");
     add(&o, "graphics=no\n");
     add(&o, "romfs=no\n");
@@ -2341,8 +2452,9 @@ Java_org_nx2a_stage1c_MainActivity_runBootstrap(
     if (!any_svc) add(&o, " none");
     add(&o, "\n");
 
-    add(&o, "ipc_sessions=%u sm_initialized=%s\n",
-        g_ipc_session_count, g_sm_initialized ? "yes" : "no");
+    add(&o, "ipc_sessions=%u sm_initialized=%s pointer_buffer=0x%x\n",
+        g_ipc_session_count, g_sm_initialized ? "yes" : "no",
+        g_pointer_buffer_size);
     for (unsigned i = 0; i < g_ipc_session_count && i < 12; ++i) {
         if (g_ipc_sessions[i].active) {
             add(&o, "  ipc_handle=0x%x service=%s\n",

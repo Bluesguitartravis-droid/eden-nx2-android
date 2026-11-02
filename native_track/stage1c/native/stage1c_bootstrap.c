@@ -153,6 +153,11 @@ static uint64_t g_aslr_region_size;
 static _Alignas(0x1000) uint8_t g_user_exception_ctx[0x1000];
 static volatile sig_atomic_t g_getinfo_hits[64];
 
+static int32_t g_main_thread_priority = 44;
+static int32_t g_main_thread_core = 0;
+static uint64_t g_main_thread_mask = 0x3f;
+static uint64_t g_main_thread_id = 1;
+
 static sigjmp_buf g_jmp;
 static volatile sig_atomic_t g_guest_active;
 static StopEvent g_stop;
@@ -1311,6 +1316,77 @@ static void guest_signal_handler(int sig, siginfo_t *si, void *ctx) {
             }
             stop_now(7, sig, 0, trap_pc, uc->uc_mcontext.regs[2], insn);
         }
+        if (svc == 0x0c) { // GetThreadPriority
+            uint64_t handle = uc->uc_mcontext.regs[1];
+            if (handle == 1 || handle == 0xffff8000ULL) {
+                uc->uc_mcontext.regs[0] = 0;
+                uc->uc_mcontext.regs[1] = (uint64_t)(uint32_t)g_main_thread_priority;
+                uc->uc_mcontext.pc = resume;
+                return;
+            }
+        }
+        if (svc == 0x0d) { // SetThreadPriority
+            uint64_t handle = uc->uc_mcontext.regs[0];
+            int32_t prio = (int32_t)uc->uc_mcontext.regs[1];
+            if (handle == 1 || handle == 0xffff8000ULL) {
+                g_main_thread_priority = prio;
+                uc->uc_mcontext.regs[0] = 0;
+                uc->uc_mcontext.pc = resume;
+                return;
+            }
+        }
+        if (svc == 0x0e) { // GetThreadCoreMask
+            uint64_t handle = uc->uc_mcontext.regs[2];
+            if (handle == 1 || handle == 0xffff8000ULL) {
+                uc->uc_mcontext.regs[0] = 0;
+                uc->uc_mcontext.regs[1] = (uint64_t)(uint32_t)g_main_thread_core;
+                uc->uc_mcontext.regs[2] = g_main_thread_mask;
+                uc->uc_mcontext.pc = resume;
+                return;
+            }
+        }
+        if (svc == 0x0f) { // SetThreadCoreMask
+            uint64_t handle = uc->uc_mcontext.regs[0];
+            int32_t core = (int32_t)uc->uc_mcontext.regs[1];
+            uint64_t mask = uc->uc_mcontext.regs[2];
+
+            if (handle == 1 || handle == 0xffff8000ULL) {
+                if (core == -2) {
+                    g_main_thread_core = 0;
+                    g_main_thread_mask = 1;
+                } else {
+                    if (core >= 0) g_main_thread_core = core;
+                    if (mask) g_main_thread_mask = mask;
+                    if (g_main_thread_mask
+                            && (g_main_thread_core < 0
+                                || !(g_main_thread_mask >> g_main_thread_core & 1))) {
+                        g_main_thread_core = __builtin_ctzll(g_main_thread_mask);
+                    }
+                }
+                uc->uc_mcontext.regs[0] = 0;
+                uc->uc_mcontext.pc = resume;
+                return;
+            }
+        }
+        if (svc == 0x10) { // GetCurrentProcessorNumber
+            uc->uc_mcontext.regs[0] =
+                (uint64_t)(uint32_t)(g_main_thread_core >= 0
+                    ? g_main_thread_core
+                    : g_main_thread_mask
+                        ? __builtin_ctzll(g_main_thread_mask)
+                        : 0);
+            uc->uc_mcontext.pc = resume;
+            return;
+        }
+        if (svc == 0x25) { // GetThreadId
+            uint64_t handle = uc->uc_mcontext.regs[1];
+            if (handle == 1 || handle == 0xffff8000ULL) {
+                uc->uc_mcontext.regs[0] = 0;
+                uc->uc_mcontext.regs[1] = g_main_thread_id;
+                uc->uc_mcontext.pc = resume;
+                return;
+            }
+        }
         if (svc == 0x01) { // SetHeapSize
             size_t requested = (size_t)uc->uc_mcontext.regs[1];
             size_t page = (size_t)sysconf(_SC_PAGESIZE);
@@ -1587,6 +1663,11 @@ Java_org_nx2a_stage1c_MainActivity_runBootstrap(
 
     cleanup();
 
+    g_main_thread_priority = 44;
+    g_main_thread_core = 0;
+    g_main_thread_mask = 0x3f;
+    g_main_thread_id = 1;
+
     char *report = (char *)calloc(1, REPORT_CAP);
     if (!report) {
         return (*env)->NewStringUTF(env, "Stage 1C report allocation failed");
@@ -1594,6 +1675,7 @@ Java_org_nx2a_stage1c_MainActivity_runBootstrap(
     Out o = {report, REPORT_CAP};
 
     add(&o, "NX2 Switch 2 Native Stage 1C Controlled Bootstrap\n");
+    add(&o, "harness_build=5\n");
     add(&o, "guest_execution=yes\n");
     add(&o, "graphics=no\n");
     add(&o, "romfs=no\n");

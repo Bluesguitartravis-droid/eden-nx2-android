@@ -1,0 +1,14 @@
+# Device: AYN Odin 3 Ultra (Adreno 830). Probe build #3 (commit 9b7d0c3), run 2026-11-02.
+NX2 Switch 2 Native Android Probe
+report=/storage/emulated/0/Android/data/org.nx2a.probe/files/switch2-native-probe.txt
+abi=64-bit
+page_size=4096
+goal: validate Android runtime assumptions before loading any user-owned Switch 2 executable
+PASS address_space: 12 GiB PROT_NONE reservation at 0x783b037000
+PASS exec_mapping: rewritten ARM64 code can execute from app memory
+INFO host_counter: cntfrq_el0=19200000 Hz
+INFO switch2_guest_counter: runtime target=31250000 Hz (must be virtualized)
+INFO vulkan_device[0]: Adreno (TM) 830 api=1.3.284 largest_heap=23092 MiB
+PASS vulkan_bc: textureCompressionBC=yes
+RESULT core_checks=3/3
+READY stage1: device is suitable for the headless rewritten-ARM64 bootstrap experiment

@@ -52,3 +52,70 @@ An unsuccessful section now stops module loading instead of copying potentially 
 3. Kotlin compile preflight and native C++ build on GitHub Actions.
 4. On-device: validate launch with both graphics drivers if possible, then inspect `NX2_ROMFS_PROBE`, `NSO ... segment`, and the first true guest error. No claim of a visible frame without a recorded present.
 5. Normal Switch titles must still load; the snapshot check is title-ID specific and the RomFS inspection is diagnostic-only.
+
+## Build 62 on-device evidence (2026-11-02)
+
+The attached Android log contained two DKB attempts and four PPP attempts.
+Keep them separate; the two failures have different mechanisms.
+
+**DKB: effective RomFS is missing critical root paths.**
+
+```
+NX2_ROMFS_PROBE DKB base_bytes=0x1f8906a9
+  mounted_bytes=0x1f8906a9 romfs_valid=true
+  System=false System/HeapSize=false RSDB=false
+```
+
+Both DKB attempts mounted the same-size (~529 MB) image and reported the
+same absent paths. The loader recognized the NSP and the Switch 2 metadata,
+selected 12 GiB and 31.25 MHz, loaded rtld/main/sdk, and returned a valid
+save-data filesystem. On Dynarmic, execution then failed at the same
+`SilverStar.nss+0x5AF1C8` as before. This **does not prove** that missing
+RomFS is the only cause of the guest null branch, but it is a concrete,
+testable content deficiency.
+
+The entrypoint was `base.nsp`. Installing Build 62 cannot retroactively
+merge updated resources into a previously created NSP. The user must
+package an accessible, complete extracted tree through Build 62's
+**base + update RomFS** packer (or choose an already merged correct image)
+for the new merge code to matter. Without valid update source data, no
+emulator code can manufacture the absent directories.
+
+The second DKB attempt emitted roughly 41,000 unmapped guest writes in a
+fraction of a second because CPU memory aborts were being ignored. Build
+63 instead halts on the first invalid DKB Dynarmic access and logs its
+guest PC/LR/SP; this is title-scoped to avoid slowing other games.
+Build 63 also logs root-level RomFS directory names, whether a registered
+update is visible, and whether an in-package update was provided. This
+will distinguish base-only NSP content from provider/mount failures.
+
+**PPP: NSO decoder fails before any execution.**
+
+```
+NSO main segment 0 decompression failed:
+ got=-23112399 expected=41194624 input=23151272
+ offset=0x10a flags=0x3f (module not loaded)
+```
+
+This repeated four times. The negative result is from the LZ4 safe
+decompressor, indicating the supplied bytes could not be decoded within
+the declared input/output bounds. Whether the cause is truncation,
+a nonstandard NSO layout or different compression remains **unknown**
+without source-byte evidence. The guarded loader correctly refuses to
+execute its incomplete output. Build 63 logs a bounded four-byte
+signature at each end of the source section, rather than silently
+adding speculative decoder fallbacks.
+
+Post-processing `AMDBoost.fx` also has a syntax error, and `tas` is
+reported as not being a directory. Neither directly accounts for
+these observed pre-game crashes.
+
+### Expected Build 63 markers
+
+- `NX2_ROMFS_LAYOUT DKB updatable=... packed_update=... registered_update=... top_dirs=[...]`
+- `NX2_DKB_FIRST_FAULT kind=... addr=... pc=... lr=... sp=...`
+- `NX2_NSO_INPUT main segment=0 first4=... last4=... input_end=... file_size=...`
+
+No claim of a fixed launch or gameplay until an APK builds successfully,
+and a subsequent on-device run shows the required resources and a
+rendered frame.

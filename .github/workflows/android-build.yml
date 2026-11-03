@@ -160,6 +160,16 @@ jobs:
           grep -n 'showAddDirectoryMenu(binding.addDirectory)' upstream/src/android/app/src/main/java/org/yuzu/yuzu_emu/ui/GamesFragment.kt
           grep -n 'NX2_LOOSE_ROMFS mode=base+update' upstream/src/core/loader/deconstructed_rom_directory.cpp
 
+      - name: Port SX2A vi2 client lifecycle notifications
+        shell: bash
+        run: |
+          python3 -m py_compile scripts/apply-nx2-vi2-client-notifications.py
+          python3 scripts/apply-nx2-vi2-client-notifications.py upstream
+          grep -n 'NX2_VI2_CLIENT_REGISTER' upstream/src/core/hle/service/nx2_gsv.h
+          grep -n 'NX2_VI2_CLIENT_RETIRE' upstream/src/core/hle/service/nx2_gsv.h
+          grep -n 'INx2Vi2Session::GetNotifications' upstream/src/core/hle/service/nx2_gsv.h
+          grep -n 'INx2Vi2Session::GetLayerBufferBits' upstream/src/core/hle/service/nx2_gsv.h
+
       - name: Verify current Eglantine NX2 fixes
         shell: bash
         run: |

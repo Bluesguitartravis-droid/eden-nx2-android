@@ -134,6 +134,7 @@ jobs:
           grep -n 'pointer buffer size fixed at 0x10000' upstream/src/core/loader/nca.cpp
           grep -n 'addLibraryExeFSGames' upstream/src/android/app/src/main/java/org/yuzu/yuzu_emu/utils/GameHelper.kt
           grep -n 'OpenSaveData returned directory' upstream/src/core/hle/service/filesystem/fsp/fsp_srv.cpp
+          grep -n 'NX2 Android DKB diagnostic: forcing Dynarmic' upstream/src/core/loader/deconstructed_rom_directory.cpp
 
       - name: Verify current Eglantine NX2 fixes
         shell: bash

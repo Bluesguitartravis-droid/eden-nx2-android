@@ -151,6 +151,15 @@ jobs:
           grep -n 'NX2 guarded NSO segment reads' upstream/src/core/loader/nso.cpp
           grep -n 'DKB effective RomFS is missing System/HeapSize' upstream/src/android/app/src/main/java/org/yuzu/yuzu_emu/features/packer/SnapshotPackerActivity.kt
 
+      - name: Enable direct ExeFS Android folder launch
+        shell: bash
+        run: |
+          python3 -m py_compile scripts/apply-nx2-direct-exefs.py
+          python3 scripts/apply-nx2-direct-exefs.py upstream
+          grep -n 'Launch ExeFS game folder' upstream/src/android/app/src/main/res/values/strings.xml
+          grep -n 'showAddDirectoryMenu(binding.addDirectory)' upstream/src/android/app/src/main/java/org/yuzu/yuzu_emu/ui/GamesFragment.kt
+          grep -n 'NX2_LOOSE_ROMFS mode=base+update' upstream/src/core/loader/deconstructed_rom_directory.cpp
+
       - name: Verify current Eglantine NX2 fixes
         shell: bash
         run: |

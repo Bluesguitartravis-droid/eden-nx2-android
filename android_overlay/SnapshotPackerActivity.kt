@@ -208,7 +208,7 @@ class SnapshotPackerActivity : AppCompatActivity() {
                 outputButton.isEnabled = true
                 sourceText.text = getString(
                     R.string.snapshot_packer_source_ready,
-                    found.label,
+                    if (found.baseRomfs != null) found.label + " (base + update RomFS)" else found.label,
                     String.format(Locale.US, "%016X", found.titleId),
                     found.version
                 )
@@ -311,7 +311,10 @@ class SnapshotPackerActivity : AppCompatActivity() {
         val titleId: Long,
         val version: Int,
         val label: String,
-        val title: String
+        val title: String,
+        // Optional base RomFS to merge under an extracted update RomFS.
+        // Most update snapshots contain only changed files.
+        val baseRomfs: DocumentFile? = null
     )
 
     private class SnapshotScanner(private val openInput: (Uri) -> InputStream?) {
@@ -327,19 +330,41 @@ class SnapshotPackerActivity : AppCompatActivity() {
             // System/HeapSize and RSDB data, and the game later initializes a heap
             // through a null pointer. Filter incomplete candidates before selecting
             // the highest version, without changing validation for other titles.
-            val launchReady = candidates.filter { candidate ->
+            // Pair an extracted updates/<version> snapshot with the base/
+            // snapshot from the same selected tree and same title ID.
+            // This mirrors the update-over-base behavior of Eglantine's NUP
+            // loader, while keeping the existing .nsp output format.
+            val composedCandidates = candidates.map { candidate ->
+                val isUpdate = candidate.label.contains("/updates/", ignoreCase = true) ||
+                    candidate.label.contains("/update/", ignoreCase = true)
+                val base = if (isUpdate) {
+                    candidates.firstOrNull { other ->
+                        other !== candidate &&
+                            other.titleId == candidate.titleId &&
+                            other.label.substringAfterLast('/').equals("base", ignoreCase = true)
+                    }
+                } else {
+                    null
+                }
+                if (base != null) candidate.copy(baseRomfs = base.romfs) else candidate
+            }
+
+            val launchReady = composedCandidates.filter { candidate ->
                 if (candidate.titleId != 0x040074A01BF12000L) {
                     true
                 } else {
-                    val system = candidate.romfs.findFile("System")
-                    val heapSize = system?.takeIf { it.isDirectory }?.findFile("HeapSize")
-                    val rsdb = candidate.romfs.findFile("RSDB")
-                    val ready = heapSize != null && rsdb?.isDirectory == true
+                    val updateSystem = candidate.romfs.findFile("System")
+                    val baseSystem = candidate.baseRomfs?.findFile("System")
+                    val heapSize = updateSystem?.takeIf { it.isDirectory }?.findFile("HeapSize")
+                        ?: baseSystem?.takeIf { it.isDirectory }?.findFile("HeapSize")
+                    val rsdb = sequenceOf(candidate.romfs, candidate.baseRomfs)
+                        .filterNotNull()
+                        .any { it.findFile("RSDB")?.isDirectory == true }
+                    val ready = heapSize != null && rsdb
                     if (!ready) {
-                        invalid += "${candidate.label}: DKB RomFS is missing System/HeapSize " +
-                            "or RSDB. This is likely an incomplete base-only snapshot. " +
-                            "Select the parent folder containing the extracted update " +
-                            "(updates/<version>/), or provide an already merged RomFS."
+                        invalid += "${candidate.label}: DKB effective RomFS is missing System/HeapSize " +
+                            "or RSDB. The app now merges base + update when both are available, " +
+                            "but this snapshot still lacks required resources."
                     }
                     ready
                 }
@@ -501,8 +526,12 @@ class SnapshotPackerActivity : AppCompatActivity() {
             try {
                 progress(2, "Reading extracted snapshot…")
                 val exefs = pfsFromDirectory(snapshot.exefs)
-                progress(5, "Building RomFS file tables…")
-                val romfs = romfsFromDirectory(snapshot.romfs)
+                progress(
+                    5,
+                    if (snapshot.baseRomfs != null) "Merging base and update RomFS…"
+                    else "Building RomFS file tables…"
+                )
+                val romfs = romfsFromDirectory(snapshot.romfs, snapshot.baseRomfs)
 
                 progress(8, "Building integrity trees…")
                 val program = nca(
@@ -812,8 +841,13 @@ class SnapshotPackerActivity : AppCompatActivity() {
             return Blob(parts)
         }
 
-        private fun romfsFromDirectory(root: DocumentFile): Blob {
+        private fun romfsFromDirectory(root: DocumentFile, base: DocumentFile? = null): Blob {
             val rootDir = DirNode("", null)
+            // Overlay semantics: updates replace files by name while base-only
+            // files and nested directories remain reachable.
+            if (base != null) {
+                buildDocumentTree(base, rootDir)
+            }
             buildDocumentTree(root, rootDir)
             return buildRomfs(rootDir)
         }
@@ -831,10 +865,18 @@ class SnapshotPackerActivity : AppCompatActivity() {
             source.listFiles().sortedWith { a, b -> utf8Compare(a.name ?: "", b.name ?: "") }.forEach { child ->
                 val name = child.name ?: error("RomFS contains an unnamed entry")
                 if (child.isDirectory) {
-                    val dir = DirNode(name, target)
-                    target.dirs += dir
+                    // A directory in the update shadows any base file by the
+                    // same name. Reuse a base directory so unchanged children
+                    // survive while changed children are overwritten.
+                    target.files.removeAll { it.name == name }
+                    val dir = target.dirs.firstOrNull { it.name == name }
+                        ?: DirNode(name, target).also { target.dirs += it }
                     buildDocumentTree(child, dir)
                 } else if (child.isFile) {
+                    // File shadows a base file *or* a directory with that name.
+                    // Never emit duplicate RomFS name entries.
+                    target.dirs.removeAll { it.name == name }
+                    target.files.removeAll { it.name == name }
                     target.files += FileNode(name, target, Blob.document(child.uri, child.length(), resolver))
                 }
             }

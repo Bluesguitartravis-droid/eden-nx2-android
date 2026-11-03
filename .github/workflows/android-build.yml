@@ -44,13 +44,13 @@ jobs:
           ok=0
           for try in 1 2 3; do
             rm -rf "$W/upstream"
-            if git clone --branch nx2-android --single-branch \
-                https://git.eden-emu.dev/moceure/eden-nx2-android.git "$W/upstream" >> "$W/clone.log" 2>&1; then
+            if git clone --branch nx2 --single-branch \
+                https://github.com/zortos293/Eglantine.git "$W/upstream" >> "$W/clone.log" 2>&1; then
               ok=1; break
             fi
             sleep 15
           done
-          if [ "$ok" = 1 ] && ! git -C "$W/upstream" checkout -q 904bfa266c23814660336db6bb0e87caf1c15305 >> "$W/clone.log" 2>&1; then
+          if [ "$ok" = 1 ] && ! git -C "$W/upstream" checkout -q 3bdd53d08adfd96b7e3e3f09344c514540ef1ce6 >> "$W/clone.log" 2>&1; then
             echo "pinned commit missing; inspecting branch HEAD" >> "$W/clone.log"
           fi
           if [ "$ok" = 1 ]; then
@@ -83,15 +83,15 @@ jobs:
       - name: Checkout build harness
         uses: actions/checkout@v4
 
-      - name: Clone SX2A PokeDinner Android base
+      - name: Clone current Eglantine NX2 Android base
         shell: bash
         run: |
-          git clone --recursive --branch nx2-android --single-branch \
-            https://git.eden-emu.dev/moceure/eden-nx2-android.git upstream
-          git -C upstream checkout 904bfa266c23814660336db6bb0e87caf1c15305
+          git clone --recursive --branch nx2 --single-branch \
+            https://github.com/zortos293/Eglantine.git upstream
+          git -C upstream checkout 3bdd53d08adfd96b7e3e3f09344c514540ef1ce6
           git -C upstream submodule update --init --recursive
           echo "NX2_COMMIT=$(git -C upstream rev-parse HEAD)" >> "$GITHUB_ENV"
-          echo "NX2_UPSTREAM=moceure/eden-nx2-android" >> "$GITHUB_ENV"
+          echo "NX2_UPSTREAM=zortos293/Eglantine:nx2" >> "$GITHUB_ENV"
           git -C upstream log -1 --oneline
 
       - name: Install host build tools
@@ -113,10 +113,10 @@ jobs:
       - name: Configure NX2 Android fork
         shell: bash
         run: |
-          python3 scripts/configure-sx2a.py upstream "build-${{ github.run_number }}"
+          python3 scripts/configure-eglantine.py upstream "build-${{ github.run_number }}"
           grep -n 'applicationId = "dev.eden.eden_emulator"' upstream/src/android/app/build.gradle.kts
           grep -n 'ENABLE_UPDATE_CHECKER=ON' upstream/src/android/app/build.gradle.kts
-          grep -n -A8 'NX2 Android fork update feed' upstream/CMakeModules/GenerateSCMRev.cmake
+          grep -n -A8 'Eden NX2 Android fork update feed' upstream/CMakeModules/GenerateSCMRev.cmake
 
       - name: Add extracted snapshot NSP packer
         shell: bash
@@ -126,11 +126,13 @@ jobs:
           grep -n 'R.string.snapshot_packer' upstream/src/android/app/src/main/java/org/yuzu/yuzu_emu/fragments/HomeSettingsFragment.kt
           grep -n 'SnapshotPackerActivity' upstream/src/android/app/src/main/AndroidManifest.xml
 
-      - name: Add embedded Switch 2 NPDM detection
+      - name: Verify current Eglantine NX2 fixes
         shell: bash
         run: |
-          python3 scripts/apply-embedded-switch2-npdm.py upstream
-          grep -n 'Switch 2 program detected from embedded NSP Program NCA NPDM' upstream/src/core/core.cpp
+          grep -n 'GetAudioOutManager' upstream/src/core/hle/service/audio/nx2_audio_user_client.h
+          grep -n 'INx2StreamPlayService' upstream/src/core/hle/service/nx2_streamplay.h
+          grep -n 'Switch 2 titles size their heap' upstream/src/core/hle/kernel/svc/svc_physical_memory.cpp
+          grep -n 'Donkey Kong Bananza asks for this' upstream/src/core/hle/service/ngc/ngc.cpp
 
       - name: Detect Android build requirements
         id: android_req

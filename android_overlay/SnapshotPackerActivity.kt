@@ -862,22 +862,42 @@ class SnapshotPackerActivity : AppCompatActivity() {
 
         private fun buildDocumentTree(source: DocumentFile, target: DirNode) {
             checkpoint()
+            // Index once per directory so large (200k+ file) snapshots don't
+            // fall back to quadratic work while applying update overrides.
+            val dirsByName = target.dirs.associateBy { it.name }.toMutableMap()
+            val filePositions = target.files.withIndex()
+                .associate { (index, file) -> file.name to index }.toMutableMap()
             source.listFiles().sortedWith { a, b -> utf8Compare(a.name ?: "", b.name ?: "") }.forEach { child ->
                 val name = child.name ?: error("RomFS contains an unnamed entry")
                 if (child.isDirectory) {
-                    // A directory in the update shadows any base file by the
-                    // same name. Reuse a base directory so unchanged children
-                    // survive while changed children are overwritten.
-                    target.files.removeAll { it.name == name }
-                    val dir = target.dirs.firstOrNull { it.name == name }
-                        ?: DirNode(name, target).also { target.dirs += it }
+                    // A directory shadows a base file of the same name.
+                    if (filePositions.remove(name) != null) {
+                        target.files.removeAll { it.name == name }
+                        filePositions.clear()
+                        target.files.forEachIndexed { index, file -> filePositions[file.name] = index }
+                    }
+                    val dir = dirsByName[name]
+                        ?: DirNode(name, target).also {
+                            target.dirs += it
+                            dirsByName[name] = it
+                        }
                     buildDocumentTree(child, dir)
                 } else if (child.isFile) {
-                    // File shadows a base file *or* a directory with that name.
-                    // Never emit duplicate RomFS name entries.
-                    target.dirs.removeAll { it.name == name }
-                    target.files.removeAll { it.name == name }
-                    target.files += FileNode(name, target, Blob.document(child.uri, child.length(), resolver))
+                    // Update files replace their base names in-place; base
+                    // siblings remain untouched.
+                    if (dirsByName.remove(name) != null) {
+                        target.dirs.removeAll { it.name == name }
+                    }
+                    val replacement = FileNode(
+                        name, target, Blob.document(child.uri, child.length(), resolver)
+                    )
+                    val existing = filePositions[name]
+                    if (existing != null) {
+                        target.files[existing] = replacement
+                    } else {
+                        filePositions[name] = target.files.size
+                        target.files += replacement
+                    }
                 }
             }
         }

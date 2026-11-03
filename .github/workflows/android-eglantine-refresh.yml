@@ -1,4 +1,5 @@
 name: Build Eden NX2 Eglantine Refresh
+# REA harness lives in scripts/rea-bananza-analysis.sh
 
 on:
   workflow_dispatch:

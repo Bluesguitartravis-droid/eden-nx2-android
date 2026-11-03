@@ -322,14 +322,37 @@ class SnapshotPackerActivity : AppCompatActivity() {
             val rootTitle = cleanTitle(rootLabel)
             val rootVersion = root.name?.toIntOrNull()?.takeIf { it >= 0 } ?: 0
             scan(root, rootLabel, 0, rootVersion, rootTitle, candidates, invalid)
-            if (candidates.isEmpty()) {
+            // DKB can have an apparently complete base/ snapshot whose RomFS only
+            // contains Voice/Voxel/XLink. Packaging that as an NSP loses the updated
+            // System/HeapSize and RSDB data, and the game later initializes a heap
+            // through a null pointer. Filter incomplete candidates before selecting
+            // the highest version, without changing validation for other titles.
+            val launchReady = candidates.filter { candidate ->
+                if (candidate.titleId != 0x040074A01BF12000L) {
+                    true
+                } else {
+                    val system = candidate.romfs.findFile("System")
+                    val heapSize = system?.takeIf { it.isDirectory }?.findFile("HeapSize")
+                    val rsdb = candidate.romfs.findFile("RSDB")
+                    val ready = heapSize != null && rsdb?.isDirectory == true
+                    if (!ready) {
+                        invalid += "${candidate.label}: DKB RomFS is missing System/HeapSize " +
+                            "or RSDB. This is likely an incomplete base-only snapshot. " +
+                            "Select the parent folder containing the extracted update " +
+                            "(updates/<version>/), or provide an already merged RomFS."
+                    }
+                    ready
+                }
+            }
+
+            if (launchReady.isEmpty()) {
                 val detail = invalid.firstOrNull()?.let { "\n$it" }.orEmpty()
                 error(
-                    "No complete snapshot found. Choose a folder containing exefs/main, " +
-                        "exefs/main.npdm and romfs/." + detail
+                    "No launch-ready snapshot found. Choose a folder containing exefs/main, " +
+                        "exefs/main.npdm and a complete romfs/." + detail
                 )
             }
-            return candidates.maxWith(compareBy<Snapshot> { it.version }.thenBy { it.label })
+            return launchReady.maxWith(compareBy<Snapshot> { it.version }.thenBy { it.label })
         }
 
         private fun scan(

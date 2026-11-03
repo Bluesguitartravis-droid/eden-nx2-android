@@ -1,0 +1,135 @@
+name: Build Eden NX2 Eglantine Refresh
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ feature/eden-eglantine-refresh ]
+    paths:
+      - ".github/workflows/android-eglantine-refresh.yml"
+      - "scripts/apply-snapshot-packer.py"
+      - "android_overlay/**"
+
+permissions:
+  contents: read
+
+jobs:
+  android-arm64:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    env:
+      EGLANTINE_REPO: zortos293/Eglantine
+      EGLANTINE_COMMIT: 3bdd53d08adfd96b7e3e3f09344c514540ef1ce6
+      CCACHE: "true"
+      CPM_SOURCE_CACHE: ${{ github.workspace }}/.cache/cpm
+
+    steps:
+      - name: Checkout Eden NX2 fork harness
+        uses: actions/checkout@v4
+
+      - name: Clone current Eglantine nx2
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git clone --recursive https://github.com/zortos293/Eglantine.git upstream
+          git -C upstream checkout "$EGLANTINE_COMMIT"
+          git -C upstream submodule update --init --recursive
+          test "$(git -C upstream rev-parse HEAD)" = "$EGLANTINE_COMMIT"
+          git -C upstream log -1 --oneline
+
+      - name: Install host and Android build dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq glslang-tools ccache
+          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"             "platforms;android-36"             "build-tools;36.0.0"             "ndk;28.2.13676358"             "cmake;3.31.5"
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+          cache-dependency-path: upstream/src/android/**/*.gradle*
+
+      - name: Cache CPM downloads
+        uses: actions/cache@v4
+        with:
+          path: .cache/cpm
+          key: eden-eglantine-cpm-${{ runner.os }}-${{ hashFiles('upstream/cpmfile.json', 'upstream/CMakeLists.txt', 'upstream/src/**/CMakeLists.txt') }}
+          restore-keys: |
+            eden-eglantine-cpm-${{ runner.os }}-
+
+      - name: Add Eden NX2 snapshot packer
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 scripts/apply-snapshot-packer.py upstream
+          test -f upstream/src/android/app/src/main/java/org/yuzu/yuzu_emu/features/packer/SnapshotPackerActivity.kt
+          grep -n 'R.string.snapshot_packer' upstream/src/android/app/src/main/java/org/yuzu/yuzu_emu/fragments/HomeSettingsFragment.kt
+          grep -n 'SnapshotPackerActivity' upstream/src/android/app/src/main/AndroidManifest.xml
+
+      - name: Verify new NX2 service fixes are present
+        shell: bash
+        run: |
+          set -euxo pipefail
+          grep -n 'GetAudioOutManager' upstream/src/core/hle/service/audio/nx2_audio_user_client.h
+          grep -n 'INx2StreamPlayService' upstream/src/core/hle/service/nx2_streamplay.h
+          grep -n 'Switch 2 titles size their heap' upstream/src/core/hle/kernel/svc/svc_physical_memory.cpp
+          grep -n 'Donkey Kong Bananza asks for this' upstream/src/core/hle/service/ngc/ngc.cpp
+
+      - name: Build side-by-side Eden NX2 refresh APK
+        shell: bash
+        working-directory: upstream
+        env:
+          GIT_TAG_NAME: eden-nx2-eglantine-refresh-${{ github.run_number }}
+        run: |
+          set -o pipefail
+          chmod +x .ci/android/build.sh
+          ./.ci/android/build.sh             --target standard             --build-type RelWithDebInfo             2>&1 | tee "$GITHUB_WORKSPACE/eden-eglantine-refresh-build.log"
+
+      - name: Collect build metadata
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "Eden NX2 Eglantine refresh"
+            echo "Source: $EGLANTINE_REPO"
+            echo "Commit: $EGLANTINE_COMMIT"
+            echo "Build: relWithDebInfo (side-by-side)"
+            echo "Expected package suffix: .relWithDebInfo"
+            echo
+            echo "Included NX2 fixes:"
+            echo "- aud:u object-return path"
+            echo "- stpl:u user service + event handle"
+            echo "- Switch 2 heap limit handling"
+            echo "- current nx2:gsv / vi2 / renderer work"
+            echo "- Bananza ngc event handle"
+            echo "- Eden NX2 snapshot packer"
+            echo
+            echo "APKs:"
+            find upstream/artifacts upstream/src/android -type f -name "*.apk" -print 2>/dev/null || true
+          } > eden-eglantine-refresh-info.txt
+
+      - name: Upload refresh APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eden-nx2-eglantine-refresh-${{ github.run_number }}
+          path: |
+            upstream/artifacts/*.apk
+            eden-eglantine-refresh-info.txt
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eden-nx2-eglantine-refresh-diagnostics-${{ github.run_number }}
+          path: |
+            eden-eglantine-refresh-build.log
+            eden-eglantine-refresh-info.txt
+          if-no-files-found: ignore
+          retention-days: 14

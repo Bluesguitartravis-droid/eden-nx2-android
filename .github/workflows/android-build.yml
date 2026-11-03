@@ -145,6 +145,9 @@ jobs:
           python3 -m py_compile scripts/apply-eglantine-switch2-regressions.py scripts/apply-nx2-content-guards.py
           python3 scripts/apply-nx2-content-guards.py upstream
           grep -n 'NX2_ROMFS_PROBE DKB' upstream/src/core/file_sys/romfs_factory.cpp
+          grep -n 'NX2_ROMFS_LAYOUT DKB' upstream/src/core/file_sys/romfs_factory.cpp
+          grep -n 'NX2_DKB_FIRST_FAULT' upstream/src/core/arm/dynarmic/arm_dynarmic_64.cpp
+          grep -n 'NX2_NSO_INPUT' upstream/src/core/loader/nso.cpp
           grep -n 'NX2 guarded NSO segment reads' upstream/src/core/loader/nso.cpp
           grep -n 'DKB effective RomFS is missing System/HeapSize' upstream/src/android/app/src/main/java/org/yuzu/yuzu_emu/features/packer/SnapshotPackerActivity.kt
 

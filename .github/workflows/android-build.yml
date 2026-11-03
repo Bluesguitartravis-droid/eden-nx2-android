@@ -125,6 +125,9 @@ jobs:
           test -f upstream/src/android/app/src/main/java/org/yuzu/yuzu_emu/features/packer/SnapshotPackerActivity.kt
           grep -n 'R.string.snapshot_packer' upstream/src/android/app/src/main/java/org/yuzu/yuzu_emu/fragments/HomeSettingsFragment.kt
           grep -n 'SnapshotPackerActivity' upstream/src/android/app/src/main/AndroidManifest.xml
+          grep -n 'val composedCandidates = candidates.map' upstream/src/android/app/src/main/java/org/yuzu/yuzu_emu/features/packer/SnapshotPackerActivity.kt
+          grep -n 'buildDocumentTree(base, rootDir)' upstream/src/android/app/src/main/java/org/yuzu/yuzu_emu/features/packer/SnapshotPackerActivity.kt
+          grep -n 'romfsFromDirectory(snapshot.romfs, snapshot.baseRomfs)' upstream/src/android/app/src/main/java/org/yuzu/yuzu_emu/features/packer/SnapshotPackerActivity.kt
 
       - name: Restore Switch 2 NSP and loose ExeFS Android paths
         shell: bash

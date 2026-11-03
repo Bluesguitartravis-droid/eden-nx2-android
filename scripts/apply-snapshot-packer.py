@@ -68,8 +68,8 @@ strings_text = strings.read_text()
 string_block = '''
     <!-- Plaintext extracted-snapshot packer. Does not decrypt retail containers. -->
     <string name="snapshot_packer">Pack extracted game to NSP</string>
-    <string name="snapshot_packer_description">Package a complete ExeFS + RomFS snapshot into an experimental plaintext NSP</string>
-    <string name="snapshot_packer_intro">Choose a complete, already-extracted game snapshot that contains exefs/main, exefs/main.npdm and romfs/. The app will create an unsigned plaintext emulator NSP and keep main.npdm beside it for Switch 2 detection.</string>
+    <string name="snapshot_packer_description">Package ExeFS and an effective, optionally base+update merged RomFS into an experimental plaintext NSP</string>
+    <string name="snapshot_packer_intro">Choose a complete, already-extracted game folder. For updates, select the parent containing base/{exefs,romfs} and updates/&lt;version&gt;/{exefs,romfs}; the packer selects the latest update and overlays its RomFS on the base. It creates an unsigned emulator NSP and keeps main.npdm beside it for Switch 2 detection. A plain exefs/romfs snapshot also works.</string>
     <string name="snapshot_packer_choose_source">Choose extracted game folder</string>
     <string name="snapshot_packer_choose_output">Choose output folder and build NSP</string>
     <string name="snapshot_packer_no_source">No snapshot selected</string>

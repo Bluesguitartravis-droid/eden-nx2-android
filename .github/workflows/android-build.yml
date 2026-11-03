@@ -136,6 +136,15 @@ jobs:
           grep -n 'OpenSaveData returned directory' upstream/src/core/hle/service/filesystem/fsp/fsp_srv.cpp
           grep -n 'NX2 Android DKB diagnostic: forcing Dynarmic' upstream/src/core/loader/deconstructed_rom_directory.cpp
 
+      - name: Probe DKB RomFS completeness and guard NSO decoding
+        shell: bash
+        run: |
+          python3 -m py_compile scripts/apply-eglantine-switch2-regressions.py scripts/apply-nx2-content-guards.py
+          python3 scripts/apply-nx2-content-guards.py upstream
+          grep -n 'NX2_ROMFS_PROBE DKB' upstream/src/core/file_sys/romfs_factory.cpp
+          grep -n 'NX2 guarded NSO segment reads' upstream/src/core/loader/nso.cpp
+          grep -n 'DKB RomFS is missing System/HeapSize' upstream/src/android/app/src/main/java/org/yuzu/yuzu_emu/features/packer/SnapshotPackerActivity.kt
+
       - name: Verify current Eglantine NX2 fixes
         shell: bash
         run: |

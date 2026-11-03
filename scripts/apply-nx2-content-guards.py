@@ -248,4 +248,125 @@ if marker not in data:
 else:
     print("Already applied: guarded NSO decompression and short-read checks")
 
+# Build 63: the Build 62 log shows 41,000+ unmapped writes when Dynarmic
+# ignores memory aborts. For DKB only, stop at the first invalid access and
+# record guest PC, LR, SP and key registers. No other title's settings change.
+dynarmic = root / "src/core/arm/dynarmic/arm_dynarmic_64.cpp"
+replace_required(
+    dynarmic,
+    "    , m_check_memory_access{m_debugger_enabled || !Settings::values.cpuopt_ignore_memory_aborts.GetValue()}",
+    """    , m_check_memory_access{m_debugger_enabled ||
+                            !Settings::values.cpuopt_ignore_memory_aborts.GetValue() ||
+                            (process != nullptr && process->IsSwitch2() &&
+                             process->GetProgramId() == 0x040074A01BF12000ULL)}""",
+    "Strict Dynarmic memory accesses for DKB only",
+)
+dynarmic_h = root / "src/core/arm/dynarmic/arm_dynarmic_64.h"
+replace_required(
+    dynarmic_h,
+    "    Kernel::KProcess* m_process{};",
+    "    Kernel::KProcess* m_process{};\n    bool m_nx2_dkb_fault_reported{};",
+    "One-shot DKB guest memory fault flag",
+)
+replace_required(
+    dynarmic,
+    """    if (!m_memory.IsValidVirtualAddressRange(addr, size)) {
+        LOG_CRITICAL(Core_ARM, "Stopping execution due to unmapped memory access at {:#x}",
+                        addr);
+        m_parent.m_jit->HaltExecution(PrefetchAbort);
+        return false;
+    }""",
+    """    if (!m_memory.IsValidVirtualAddressRange(addr, size)) {
+        if (m_process != nullptr && m_process->IsSwitch2() &&
+            m_process->GetProgramId() == 0x040074A01BF12000ULL) {
+            if (!m_nx2_dkb_fault_reported) {
+                m_nx2_dkb_fault_reported = true;
+                LOG_CRITICAL(Core_ARM,
+                             "NX2_DKB_FIRST_FAULT kind={} addr={:#x} size={} "
+                             "pc={:#x} lr={:#x} sp={:#x} x0={:#x} x1={:#x} x8={:#x}",
+                             static_cast<u32>(type), addr, size,
+                             m_parent.m_jit->GetPC(),
+                             m_parent.m_jit->GetRegister(30),
+                             m_parent.m_jit->GetSP(),
+                             m_parent.m_jit->GetRegister(0),
+                             m_parent.m_jit->GetRegister(1),
+                             m_parent.m_jit->GetRegister(8));
+            }
+        } else {
+            LOG_CRITICAL(Core_ARM,
+                         "Stopping execution due to unmapped memory access at {:#x}", addr);
+        }
+        m_parent.m_jit->HaltExecution(PrefetchAbort);
+        return false;
+    }""",
+    "Halt and trace first invalid DKB guest memory access",
+)
+
+# Log the root-level RomFS directory names and update provenance. This
+# distinguishes a base-only image from an update registration/mount problem.
+replace_required(
+    romfs_cpp,
+    '#include "core/file_sys/romfs.h"',
+    '#include <string>\n#include "core/file_sys/romfs.h"',
+    "RomFS layout diagnostic string include",
+)
+replace_required(
+    romfs_cpp,
+    """        LOG_WARNING(Service_FS,
+                    "NX2_ROMFS_PROBE DKB base_bytes={:#x} mounted_bytes={:#x} """,
+    """        std::string top_level_dirs;
+        if (root != nullptr) {
+            std::size_t count{};
+            for (const auto& dir : root->GetSubdirectories()) {
+                if (count++ == 12) {
+                    top_level_dirs += ",...";
+                    break;
+                }
+                if (!top_level_dirs.empty()) {
+                    top_level_dirs += ",";
+                }
+                top_level_dirs += dir->GetName().substr(0, 48);
+            }
+        }
+        const auto available_update = content_provider.GetEntry(
+            GetUpdateTitleID(current_process_title_id), ContentRecordType::Program);
+        LOG_WARNING(Service_FS,
+                    "NX2_ROMFS_LAYOUT DKB updatable={} packed_update={} "
+                    "registered_update={} top_dirs=[{}]",
+                    updatable, packed_update_raw != nullptr,
+                    available_update != nullptr, top_level_dirs);
+        LOG_WARNING(Service_FS,
+                    "NX2_ROMFS_PROBE DKB base_bytes={:#x} mounted_bytes={:#x} """,
+    "One-shot DKB effective RomFS root directory and update status",
+)
+
+# A repeatable NSO decode failure at +0x10a needs a 4-byte byte signature,
+# not speculative additional codec/offset fallbacks.
+data = nso_file.read_text()
+nso_failure = """                    if (result != static_cast<int>(decoded_size)) {
+                        LOG_ERROR(Loader,
+                                  "NSO {} segment {} decompression failed: got={} """""
+nso_probe = """                    if (result != static_cast<int>(decoded_size)) {
+                        const auto byte_at = [&](std::size_t at) -> u32 {
+                            return at < source_size ? static_cast<u32>(source_data[at]) : 0u;
+                        };
+                        LOG_ERROR(Loader,
+                                  "NX2_NSO_INPUT {} segment={} first4={:02x}{:02x}{:02x}{:02x} "
+                                  "last4={:02x}{:02x}{:02x}{:02x} input_end={:#x} file_size={:#x}",
+                                  nso_file.GetName(), i,
+                                  byte_at(0), byte_at(1), byte_at(2), byte_at(3),
+                                  byte_at(source_size > 3 ? source_size - 4 : 0),
+                                  byte_at(source_size > 2 ? source_size - 3 : 0),
+                                  byte_at(source_size > 1 ? source_size - 2 : 0),
+                                  byte_at(source_size > 0 ? source_size - 1 : 0),
+                                  source_offset + source_size, file_size);
+                        LOG_ERROR(Loader,
+                                  "NSO {} segment {} decompression failed: got={} """""
+if "NX2_NSO_INPUT" not in data:
+    if nso_failure not in data:
+        raise SystemExit("Could not find NSO failure logging insertion point")
+    data = data.replace(nso_failure, nso_probe, 1)
+    nso_file.write_text(data)
+    print("Applied: NSO failed-decompression byte signature diagnostics")
+
 print("NX2 content guards installed")

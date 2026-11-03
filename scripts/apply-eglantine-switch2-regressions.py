@@ -490,9 +490,38 @@ if "returning IFileSystem for storage_id" not in fsp_text:
 
 fsp.write_text(fsp_text)
 
+# ---------------------------------------------------------------------------
+# 5. DKB Android NCE A/B: Build 57 still faults at SilverStar.nss+0x5AF1C8
+#    after NCE skips hundreds of invalid accesses at low addresses. Use
+#    Dynarmic for DKB only on Android so we can distinguish guest logic/service
+#    gaps from NCE fault-recovery corruption. Other Switch 2 titles keep NCE.
+# ---------------------------------------------------------------------------
+deconstructed = root / "src" / "core" / "loader" / "deconstructed_rom_directory.cpp"
+deconstructed_text = deconstructed.read_text()
+nce_old = '''    Settings::SetNceEnabled(is_39bit);
+'''
+nce_new = '''#if defined(__ANDROID__)
+    constexpr u64 DkbTitleId = 0x040074A01BF12000ULL;
+    const bool force_dynarmic_for_dkb = metadata.GetTitleID() == DkbTitleId;
+    if (force_dynarmic_for_dkb && is_39bit) {
+        LOG_WARNING(Loader,
+                    "NX2 Android DKB diagnostic: forcing Dynarmic instead of NCE after "
+                    "Build 57 NCE invalid-access corruption at main+0x5AF1C8");
+    }
+    Settings::SetNceEnabled(is_39bit && !force_dynarmic_for_dkb);
+#else
+    Settings::SetNceEnabled(is_39bit);
+#endif
+'''
+if "NX2 Android DKB diagnostic: forcing Dynarmic" not in deconstructed_text:
+    if nce_old not in deconstructed_text:
+        raise SystemExit(f"Could not find NCE enable point in {deconstructed}")
+    deconstructed_text = deconstructed_text.replace(nce_old, nce_new, 1)
+deconstructed.write_text(deconstructed_text)
+
 print("Applied Eglantine Switch 2 Android regression fixes:")
 print(" - embedded NSP NPDM early detection / 12 GiB + 31.25 MHz startup")
 print(" - Switch 2 QueryPointerBufferSize = 0x10000")
 print(" - loose ExeFS Android library discovery restored")
 print(" - NUP added to Android file/container extension sets")
-print(" - save-data handoff diagnostics added")
+print(" - save-data handoff diagnostics added")\nprint(" - Android DKB forced to Dynarmic for NCE A/B diagnostics")

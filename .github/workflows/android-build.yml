@@ -126,6 +126,15 @@ jobs:
           grep -n 'R.string.snapshot_packer' upstream/src/android/app/src/main/java/org/yuzu/yuzu_emu/fragments/HomeSettingsFragment.kt
           grep -n 'SnapshotPackerActivity' upstream/src/android/app/src/main/AndroidManifest.xml
 
+      - name: Restore Switch 2 NSP and loose ExeFS Android paths
+        shell: bash
+        run: |
+          python3 scripts/apply-eglantine-switch2-regressions.py upstream
+          grep -n 'embedded NSP Program NCA NPDM' upstream/src/core/core.cpp
+          grep -n 'pointer buffer size fixed at 0x10000' upstream/src/core/loader/nca.cpp
+          grep -n 'addLibraryExeFSGames' upstream/src/android/app/src/main/java/org/yuzu/yuzu_emu/utils/GameHelper.kt
+          grep -n 'OpenSaveData returned directory' upstream/src/core/hle/service/filesystem/fsp/fsp_srv.cpp
+
       - name: Verify current Eglantine NX2 fixes
         shell: bash
         run: |

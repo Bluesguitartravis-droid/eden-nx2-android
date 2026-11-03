@@ -164,20 +164,66 @@ if marker not in data:
                                   nso_file.GetName(), i);
                         return std::nullopt;
                     }
-                    const int result = nso_header.IsZBICCompressed()
-                        ? Common::Compression::DecompressDataZBIC(
-                              std::span<u8>{decoded_data}.first(decoded_size),
-                              std::span<const u8>{source_data}.first(source_size))
-                        : Common::Compression::DecompressDataLZ4(
-                              decoded_data.data(), decoded_size,
-                              source_data.data(), source_size);
+                    // Newer SDKs may carry ZBIC (a modified zstd frame),
+                    // with a short prefix before its magic. Detect the frame
+                    // in the first 32 bytes, then try LZ4 if it is absent or
+                    // the ZBIC decoder reports an unexpected size.
+                    const auto decode = [&]() -> int {
+                        constexpr u32 ZbicMagic = 0x4349425A;
+                        std::size_t zbic_offset = source_size;
+                        for (std::size_t at = 0; at + sizeof(u32) <= source_size &&
+                                                 at <= 32; ++at) {
+                            u32 magic{};
+                            std::memcpy(&magic, source_data.data() + at, sizeof(magic));
+                            if (magic == ZbicMagic) {
+                                zbic_offset = at;
+                                break;
+                            }
+                        }
+                        if (zbic_offset < source_size || nso_header.IsZBICCompressed()) {
+                            const auto start = zbic_offset < source_size ? zbic_offset : 0;
+                            const int zbic_result = Common::Compression::DecompressDataZBIC(
+                                std::span<u8>{decoded_data}.first(decoded_size),
+                                std::span<const u8>{source_data}.subspan(
+                                    start, source_size - start));
+                            if (zbic_result == static_cast<int>(decoded_size)) {
+                                return zbic_result;
+                            }
+                        }
+                        return Common::Compression::DecompressDataLZ4(
+                            decoded_data.data(), decoded_size,
+                            source_data.data(), source_size);
+                    };
+
+                    int result = decode();
+                    // Some Switch 2 NSOs place text at +0x108 rather than
+                    // +0x100. Only probe that documented adjacent offset for
+                    // segment zero, and only accept an exact-size decode.
+                    if (result != static_cast<int>(decoded_size) && i == 0 &&
+                        (source_offset == sizeof(NSOHeader) ||
+                         source_offset == sizeof(NSOHeader) + 8)) {
+                        const std::size_t alt_offset = source_offset == sizeof(NSOHeader)
+                            ? sizeof(NSOHeader) + 8 : sizeof(NSOHeader);
+                        if (alt_offset <= file_size &&
+                            source_size <= file_size - alt_offset &&
+                            nso_file.Read(source_data.data(), source_size, alt_offset) ==
+                                source_size) {
+                            result = decode();
+                            if (result == static_cast<int>(decoded_size)) {
+                                LOG_WARNING(Loader,
+                                            "NSO {} segment 0 decoded at alternate text "
+                                            "offset {:#x} (header offset {:#x})",
+                                            nso_file.GetName(), alt_offset, source_offset);
+                            }
+                        }
+                    }
                     if (result != static_cast<int>(decoded_size)) {
                         LOG_ERROR(Loader,
-                                  "NSO {} segment {} {} decompression failed: got={} "
-                                  "expected={} input={} (module not loaded)",
-                                  nso_file.GetName(), i,
-                                  nso_header.IsZBICCompressed() ? "ZBIC" : "LZ4",
-                                  result, decoded_size, source_size);
+                                  "NSO {} segment {} decompression failed: got={} "
+                                  "expected={} input={} offset={:#x} flags={:#x} "
+                                  "(module not loaded)",
+                                  nso_file.GetName(), i, result, decoded_size,
+                                  source_size, source_offset, static_cast<u32>(nso_header.flags));
                         return std::nullopt;
                     }
                     std::memcpy(codeset.memory.data() + destination_offset,

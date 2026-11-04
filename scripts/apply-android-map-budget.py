@@ -28,23 +28,36 @@ if old not in t:
     raise SystemExit("LazyGpuOnlyRegions shape changed")
 t = t.replace(old, new, 1)
 
-# 2. Mapping-count helper at file scope.
-helper = '''// Lines in /proc/self/maps: the process's memory mappings, which vm.max_map_count limits.
-inline size_t Nx2CountProcessMappings() {
+# 2. Mapping summary helper at file scope: count, mapped bytes, largest gap, top address.
+helper = '''// /proc/self/maps summary: mapping count (vm.max_map_count limits it), bytes mapped, the
+// largest unmapped gap below the top mapping and the top address (Android arm64 has a 39-bit
+// user address space, 512 GiB). A failing mmap with few mappings means address space ran out.
+inline std::string Nx2MapsSummary() {
     std::FILE* f = std::fopen("/proc/self/maps", "r");
     if (f == nullptr) {
-        return 0;
+        return "unavailable";
     }
-    size_t lines = 0;
-    char buffer[16384];
-    size_t n;
-    while ((n = std::fread(buffer, 1, sizeof(buffer), f)) > 0) {
-        for (size_t i = 0; i < n; ++i) {
-            lines += buffer[i] == '\\n';
+    size_t count = 0;
+    unsigned long long mapped = 0, largest_gap = 0, previous_end = 0, top = 0;
+    char line[512];
+    while (std::fgets(line, sizeof(line), f) != nullptr) {
+        unsigned long long start = 0, end = 0;
+        if (std::sscanf(line, "%llx-%llx", &start, &end) != 2 || start >= (1ULL << 48)) {
+            continue;
         }
+        ++count;
+        mapped += end - start;
+        if (previous_end != 0 && start > previous_end) {
+            largest_gap = (std::max)(largest_gap, start - previous_end);
+        }
+        previous_end = (std::max)(previous_end, end);
+        top = (std::max)(top, end);
     }
     std::fclose(f);
-    return lines;
+    char out[160];
+    std::snprintf(out, sizeof(out), "count=%zu mapped=%.1fGiB largest_gap=%.1fGiB top=%#llx", count,
+                  mapped / 1073741824.0, largest_gap / 1073741824.0, top);
+    return out;
 }
 
 '''
@@ -60,7 +73,7 @@ present = '''            if (++m_stats.presents == 600) {
 if present not in t:
     raise SystemExit("present stats anchor missing")
 t = t.replace(present, '''            if (++m_stats.presents == 600) {
-                LOG_INFO(Service, "NX2_MAPS count={} at present", Nx2CountProcessMappings());
+                LOG_INFO(Service, "NX2_MAPS {} at present", Nx2MapsSummary());
                 LOG_INFO(Service,
                          "nx2:vi2 last 600 presents: ''', 1)
 
@@ -69,8 +82,8 @@ m = re.search(r"(    std::optional<MappedBacking> AllocateGpuOnlyBacking\(u64 si
 if not m:
     raise SystemExit("AllocateGpuOnlyBacking anchor missing")
 t = t[:m.end()] + '''        static std::atomic<u32> nx2_backings{0};
-        if ((nx2_backings.fetch_add(1, std::memory_order_relaxed) & 255) == 0) {
-            LOG_INFO(Service, "NX2_MAPS count={} at GPU-only backing {:#x}", Nx2CountProcessMappings(), size);
+        if ((nx2_backings.fetch_add(1, std::memory_order_relaxed) & 63) == 0) {
+            LOG_INFO(Service, "NX2_MAPS {} at GPU-only backing {:#x}", Nx2MapsSummary(), size);
         }
 ''' + t[m.end():]
 

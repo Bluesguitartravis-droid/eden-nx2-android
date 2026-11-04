@@ -18,4 +18,12 @@ This repository is an experimental community build project. It is not an officia
 
 ## Build status
 
-The initial CI workflow intentionally builds directly from the upstream NX2 source so that we can establish an Android compile baseline before carrying patches locally.
+`main` builds from **Eglantine NX2** (commit `9a435b5`) with the Android patches described in
+[docs/EGLANTINE_BASE.md](docs/EGLANTINE_BASE.md). Every successful build on `main` is published as a
+GitHub release; the in-app updater follows those releases.
+
+First confirmed Switch 2 result on the AYN Odin 3 Ultra: **Mario Tennis Fever** runs to its title
+screen at about 50 FPS (build 83). Launch Switch 2 games as loose folders and use the bundled Turnip
+driver.
+
+The previous SX2A v0.3.2 baseline (build 69) is documented in [docs/SX2A_BASE.md](docs/SX2A_BASE.md).

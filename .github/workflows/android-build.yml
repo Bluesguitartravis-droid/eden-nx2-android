@@ -118,39 +118,6 @@ jobs:
           grep -n 'ENABLE_UPDATE_CHECKER=ON' upstream/src/android/app/build.gradle.kts
           grep -n -A8 'Eden NX2 Android fork update feed' upstream/CMakeModules/GenerateSCMRev.cmake
 
-      - name: Add extracted snapshot NSP packer
-        shell: bash
-        run: |
-          python3 scripts/apply-snapshot-packer.py upstream
-          test -f upstream/src/android/app/src/main/java/org/yuzu/yuzu_emu/features/packer/SnapshotPackerActivity.kt
-          grep -n 'R.string.snapshot_packer' upstream/src/android/app/src/main/java/org/yuzu/yuzu_emu/fragments/HomeSettingsFragment.kt
-          grep -n 'SnapshotPackerActivity' upstream/src/android/app/src/main/AndroidManifest.xml
-          grep -n 'val composedCandidates = candidates.map' upstream/src/android/app/src/main/java/org/yuzu/yuzu_emu/features/packer/SnapshotPackerActivity.kt
-          grep -n 'buildDocumentTree(base, rootDir)' upstream/src/android/app/src/main/java/org/yuzu/yuzu_emu/features/packer/SnapshotPackerActivity.kt
-          grep -n 'romfsFromDirectory(snapshot.romfs, snapshot.baseRomfs)' upstream/src/android/app/src/main/java/org/yuzu/yuzu_emu/features/packer/SnapshotPackerActivity.kt
-
-      - name: Restore Switch 2 NSP and loose ExeFS Android paths
-        shell: bash
-        run: |
-          python3 scripts/apply-eglantine-switch2-regressions.py upstream
-          grep -n 'embedded NSP Program NCA NPDM' upstream/src/core/core.cpp
-          grep -n 'pointer buffer size fixed at 0x10000' upstream/src/core/loader/nca.cpp
-          grep -n 'addLibraryExeFSGames' upstream/src/android/app/src/main/java/org/yuzu/yuzu_emu/utils/GameHelper.kt
-          grep -n 'OpenSaveData returned directory' upstream/src/core/hle/service/filesystem/fsp/fsp_srv.cpp
-          grep -n 'NX2 Android DKB diagnostic: forcing Dynarmic' upstream/src/core/loader/deconstructed_rom_directory.cpp
-
-      - name: Probe DKB RomFS completeness and guard NSO decoding
-        shell: bash
-        run: |
-          python3 -m py_compile scripts/apply-eglantine-switch2-regressions.py scripts/apply-nx2-content-guards.py
-          python3 scripts/apply-nx2-content-guards.py upstream
-          grep -n 'NX2_ROMFS_PROBE DKB' upstream/src/core/file_sys/romfs_factory.cpp
-          grep -n 'NX2_ROMFS_LAYOUT DKB' upstream/src/core/file_sys/romfs_factory.cpp
-          grep -n 'NX2_DKB_FIRST_FAULT' upstream/src/core/arm/dynarmic/arm_dynarmic_64.cpp
-          grep -n 'NX2_NSO_INPUT' upstream/src/core/loader/nso.cpp
-          grep -n 'NX2 guarded NSO segment reads' upstream/src/core/loader/nso.cpp
-          grep -n 'DKB effective RomFS is missing System/HeapSize' upstream/src/android/app/src/main/java/org/yuzu/yuzu_emu/features/packer/SnapshotPackerActivity.kt
-
       - name: Enable direct ExeFS Android folder launch
         shell: bash
         run: |
@@ -159,24 +126,6 @@ jobs:
           grep -n 'Launch ExeFS game folder' upstream/src/android/app/src/main/res/values/strings.xml
           grep -n 'showAddDirectoryMenu(binding.addDirectory)' upstream/src/android/app/src/main/java/org/yuzu/yuzu_emu/ui/GamesFragment.kt
           grep -n 'NX2_LOOSE_ROMFS mode=base+update' upstream/src/core/loader/deconstructed_rom_directory.cpp
-
-      - name: Port SX2A vi2 client lifecycle notifications
-        shell: bash
-        run: |
-          python3 -m py_compile scripts/apply-nx2-vi2-client-notifications.py
-          python3 scripts/apply-nx2-vi2-client-notifications.py upstream
-          grep -n 'NX2_VI2_CLIENT_REGISTER' upstream/src/core/hle/service/nx2_gsv.h
-          grep -n 'NX2_VI2_CLIENT_RETIRE' upstream/src/core/hle/service/nx2_gsv.h
-          grep -n 'INx2Vi2Session::GetNotifications' upstream/src/core/hle/service/nx2_gsv.h
-          grep -n 'INx2Vi2Session::GetLayerBufferBits' upstream/src/core/hle/service/nx2_gsv.h
-
-      - name: Verify current Eglantine NX2 fixes
-        shell: bash
-        run: |
-          grep -n 'GetAudioOutManager' upstream/src/core/hle/service/audio/nx2_audio_user_client.h
-          grep -n 'INx2StreamPlayService' upstream/src/core/hle/service/nx2_streamplay.h
-          grep -n 'Switch 2 titles size their heap' upstream/src/core/hle/kernel/svc/svc_physical_memory.cpp
-          grep -n 'Donkey Kong Bananza asks for this' upstream/src/core/hle/service/ngc/ngc.cpp
 
       - name: Detect Android build requirements
         id: android_req

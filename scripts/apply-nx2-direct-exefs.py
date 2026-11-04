@@ -131,9 +131,15 @@ if '#include "core/file_sys/nup_container.h"' not in data:
 if "#include <string>\n" not in data:
     data = data.replace("#include <string_view>\n", "#include <string>\n#include <string_view>\n", 1)
 start_marker = "FileSys::VirtualFile FindLooseRomFS(const FileSys::VirtualDir& exefs_dir) {\n"
-end_marker = "// The display version of a dump without control data"
 start = data.find(start_marker)
-end = data.find(end_marker, start)
+# Stop before the first helper that follows FindLooseRomFS: newer upstreams put
+# NewestProductTag there, ahead of the display-version comment.
+end = -1
+for end_marker in ("// The newest three-digit tag in a directory's file names",
+                   "// The display version of a dump without control data"):
+    end = data.find(end_marker, start)
+    if end >= 0:
+        break
 if "NX2_LOOSE_ROMFS" not in data:
     if start < 0 or end < 0 or 'LOG_INFO(Loader, "Loose RomFS image ready: elapsed_ms={}"' not in data[start:end]:
         raise SystemExit("Unexpected native loose RomFS loader shape")

@@ -197,6 +197,7 @@ jobs:
         run: |
           # Annotations are readable through the GitHub API even when log/artifact
           # downloads are not, so mirror the key failure lines here.
+          set +e +o pipefail
           LOG="$GITHUB_WORKSPACE/android-build.log"
           [ -f "$LOG" ] || { echo "::error title=no-build-log::android-build.log was not produced"; exit 0; }
           emit() {

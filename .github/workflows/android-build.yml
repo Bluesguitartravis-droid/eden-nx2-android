@@ -208,6 +208,7 @@ jobs:
           (grep -nE "error:|Error:|FAILED|What went wrong|CMake Error|undefined reference|fatal error|> Task .* FAILED|Could not|not found" "$LOG" || true) | head -n 150 | emit build-errors
           (grep -nA40 "What went wrong" "$LOG" || true) | head -n 120 | emit what-went-wrong
           (grep -nB5 -A25 "CMake Error" "$LOG" || true) | head -n 150 | emit cmake-error
+          grep -nE "^e: |^w: .*error" "$LOG" | head -n 60 | emit kotlin-errors
           tail -n 120 "$LOG" | emit log-tail
 
       - name: Collect build metadata

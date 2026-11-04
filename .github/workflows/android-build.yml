@@ -141,6 +141,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-android-map-budget.py upstream
 
+      - name: Android heap tracker map budget
+        shell: bash
+        run: python3 scripts/apply-android-heap-tracker-budget.py upstream
+
       - name: Android libc++ atomic_ref compatibility
         shell: bash
         run: python3 scripts/apply-android-atomic-ref-compat.py upstream

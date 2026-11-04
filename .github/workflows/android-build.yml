@@ -44,13 +44,13 @@ jobs:
           ok=0
           for try in 1 2 3; do
             rm -rf "$W/upstream"
-            if git clone --branch nx2-android --single-branch \
-                https://git.eden-emu.dev/moceure/eden-nx2-android.git "$W/upstream" >> "$W/clone.log" 2>&1; then
+            if git clone --branch nx2 --single-branch \
+                https://github.com/zortos293/Eglantine.git "$W/upstream" >> "$W/clone.log" 2>&1; then
               ok=1; break
             fi
             sleep 15
           done
-          if [ "$ok" = 1 ] && ! git -C "$W/upstream" checkout -q dd3cb327c79f511830e460b916a45a33b5738759 >> "$W/clone.log" 2>&1; then
+          if [ "$ok" = 1 ] && ! git -C "$W/upstream" checkout -q 9a435b5 >> "$W/clone.log" 2>&1; then
             echo "pinned commit missing; inspecting branch HEAD" >> "$W/clone.log"
           fi
           if [ "$ok" = 1 ]; then
@@ -83,15 +83,15 @@ jobs:
       - name: Checkout build harness
         uses: actions/checkout@v4
 
-      - name: Clone SX2A v0.3.2 (known good on Odin 3 Ultra)
+      - name: Clone current Eglantine NX2 Android base
         shell: bash
         run: |
-          git clone --recursive --branch nx2-android --single-branch \
-            https://git.eden-emu.dev/moceure/eden-nx2-android.git upstream
-          git -C upstream checkout dd3cb327c79f511830e460b916a45a33b5738759
+          git clone --recursive --branch nx2 --single-branch \
+            https://github.com/zortos293/Eglantine.git upstream
+          git -C upstream checkout 9a435b5
           git -C upstream submodule update --init --recursive
           echo "NX2_COMMIT=$(git -C upstream rev-parse HEAD)" >> "$GITHUB_ENV"
-          echo "NX2_UPSTREAM=moceure/eden-nx2-android" >> "$GITHUB_ENV"
+          echo "NX2_UPSTREAM=zortos293/Eglantine:nx2" >> "$GITHUB_ENV"
           git -C upstream log -1 --oneline
 
       - name: Install host build tools
@@ -113,10 +113,41 @@ jobs:
       - name: Configure NX2 Android fork
         shell: bash
         run: |
-          python3 scripts/configure-sx2a.py upstream "build-${{ github.run_number }}"
+          python3 scripts/configure-eglantine.py upstream "build-${{ github.run_number }}"
           grep -n 'applicationId = "dev.eden.eden_emulator"' upstream/src/android/app/build.gradle.kts
           grep -n 'ENABLE_UPDATE_CHECKER=ON' upstream/src/android/app/build.gradle.kts
-          grep -n -A8 'NX2 Android fork update feed' upstream/CMakeModules/GenerateSCMRev.cmake
+          grep -n -A8 'Eden NX2 Android fork update feed' upstream/CMakeModules/GenerateSCMRev.cmake
+
+      - name: Restore Android loose ExeFS discovery (tolerant)
+        shell: bash
+        run: |
+          python3 scripts/apply-eglantine-switch2-regressions-tolerant.py upstream | tee regressions.log
+          grep NX2_PATCH_SKIP regressions.log | sed 's/^/::warning title=patch-skip::/' || true
+
+      - name: Enable direct ExeFS Android folder launch
+        shell: bash
+        run: |
+          python3 -m py_compile scripts/apply-nx2-direct-exefs.py
+          python3 scripts/apply-nx2-direct-exefs.py upstream
+          grep -n 'Launch ExeFS game folder' upstream/src/android/app/src/main/res/values/strings.xml
+          grep -n 'showAddDirectoryMenu(binding.addDirectory)' upstream/src/android/app/src/main/java/org/yuzu/yuzu_emu/ui/GamesFragment.kt
+          grep -n 'NX2_LOOSE_ROMFS mode=base+update' upstream/src/core/loader/deconstructed_rom_directory.cpp
+
+      - name: Decode prefixed ZBIC NSO frames and add content diagnostics
+        shell: bash
+        run: python3 scripts/apply-nx2-content-guards.py upstream
+
+      - name: Android memory-map budget (GPU-only regions, NX2_MAPS log)
+        shell: bash
+        run: python3 scripts/apply-android-map-budget.py upstream
+
+      - name: Android heap tracker map budget
+        shell: bash
+        run: python3 scripts/apply-android-heap-tracker-budget.py upstream
+
+      - name: Android libc++ atomic_ref compatibility
+        shell: bash
+        run: python3 scripts/apply-android-atomic-ref-compat.py upstream
 
       - name: Detect Android build requirements
         id: android_req
@@ -188,6 +219,7 @@ jobs:
         run: |
           # Annotations are readable through the GitHub API even when log/artifact
           # downloads are not, so mirror the key failure lines here.
+          set +e +o pipefail
           LOG="$GITHUB_WORKSPACE/android-build.log"
           [ -f "$LOG" ] || { echo "::error title=no-build-log::android-build.log was not produced"; exit 0; }
           emit() {
@@ -199,6 +231,7 @@ jobs:
           (grep -nE "error:|Error:|FAILED|What went wrong|CMake Error|undefined reference|fatal error|> Task .* FAILED|Could not|not found" "$LOG" || true) | head -n 150 | emit build-errors
           (grep -nA40 "What went wrong" "$LOG" || true) | head -n 120 | emit what-went-wrong
           (grep -nB5 -A25 "CMake Error" "$LOG" || true) | head -n 150 | emit cmake-error
+          grep -nE "^e: |^w: .*error" "$LOG" | head -n 60 | emit kotlin-errors
           tail -n 120 "$LOG" | emit log-tail
 
       - name: Collect build metadata

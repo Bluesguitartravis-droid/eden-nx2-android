@@ -133,6 +133,10 @@ jobs:
           grep -n 'showAddDirectoryMenu(binding.addDirectory)' upstream/src/android/app/src/main/java/org/yuzu/yuzu_emu/ui/GamesFragment.kt
           grep -n 'NX2_LOOSE_ROMFS mode=base+update' upstream/src/core/loader/deconstructed_rom_directory.cpp
 
+      - name: Decode prefixed ZBIC NSO frames and add content diagnostics
+        shell: bash
+        run: python3 scripts/apply-nx2-content-guards.py upstream
+
       - name: Android memory-map budget (GPU-only regions, NX2_MAPS log)
         shell: bash
         run: python3 scripts/apply-android-map-budget.py upstream

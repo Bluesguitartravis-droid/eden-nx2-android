@@ -155,6 +155,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-android-int64-compat.py upstream
 
+      - name: Host crash location report (NX2_FAULT)
+        shell: bash
+        run: python3 scripts/apply-nx2-fault-report.py upstream
+
       - name: Detect Android build requirements
         id: android_req
         shell: bash

@@ -171,6 +171,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-hang-watchdog.py upstream
 
+      - name: GPU-thread profiler on (test builds)
+        shell: bash
+        run: python3 scripts/apply-nx2-gpu-profile-on.py upstream
+
       - name: Detect Android build requirements
         id: android_req
         shell: bash

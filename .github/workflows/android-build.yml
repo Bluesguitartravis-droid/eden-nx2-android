@@ -12,7 +12,7 @@ on:
         type: boolean
         default: false
   push:
-    branches: [ main, fix/embedded-switch2-npdm ]
+    branches: [ main, fix/embedded-switch2-npdm, claude/lichii-test ]
     paths:
       - ".github/workflows/android-build.yml"
       - "patches/**"
@@ -76,6 +76,8 @@ jobs:
 
   android-arm64:
     if: github.event_name != 'workflow_dispatch' || !inputs.skip_build
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     timeout-minutes: 90
 
@@ -83,15 +85,16 @@ jobs:
       - name: Checkout build harness
         uses: actions/checkout@v4
 
-      - name: Clone current Eglantine NX2 Android base
+      - name: Clone Lichii build-75 base (test branch)
         shell: bash
         run: |
+          # Lichii is zortos293's continuation of Eglantine nx2 (9a435b5 is an ancestor).
           git clone --recursive --branch nx2 --single-branch \
-            https://github.com/zortos293/Eglantine.git upstream
-          git -C upstream checkout 9a435b5
+            https://github.com/zortos293/Lichii.git upstream
+          git -C upstream checkout c9ebb5c3af672a0472ca0811392f04fab10203ab
           git -C upstream submodule update --init --recursive
           echo "NX2_COMMIT=$(git -C upstream rev-parse HEAD)" >> "$GITHUB_ENV"
-          echo "NX2_UPSTREAM=zortos293/Eglantine:nx2" >> "$GITHUB_ENV"
+          echo "NX2_UPSTREAM=zortos293/Lichii:build-75" >> "$GITHUB_ENV"
           git -C upstream log -1 --oneline
 
       - name: Install host build tools
@@ -113,10 +116,9 @@ jobs:
       - name: Configure NX2 Android fork
         shell: bash
         run: |
-          python3 scripts/configure-eglantine.py upstream "build-${{ github.run_number }}"
-          grep -n 'applicationId = "dev.eden.eden_emulator"' upstream/src/android/app/build.gradle.kts
-          grep -n 'ENABLE_UPDATE_CHECKER=ON' upstream/src/android/app/build.gradle.kts
-          grep -n -A8 'Eden NX2 Android fork update feed' upstream/CMakeModules/GenerateSCMRev.cmake
+          python3 scripts/configure-lichii.py upstream "build-${{ github.run_number }}"
+          grep -n 'LICHII_BUILD' upstream/src/android/app/build.gradle.kts
+          grep -n 'AUTO_UPDATE' upstream/CMakeModules/GenerateSCMRev.cmake
 
       - name: Restore Android loose ExeFS discovery (tolerant)
         shell: bash
@@ -258,6 +260,22 @@ jobs:
             build-info.txt
           if-no-files-found: error
           retention-days: 14
+
+      - name: Publish test pre-release (not marked latest)
+        if: success() && github.ref_name == 'claude/lichii-test'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          apk="$(find upstream/src/android -type f -name '*.apk' | head -n1)"
+          mkdir -p dist && cp "$apk" "dist/Eden-NX2-Android-lichii-test-${{ github.run_number }}.apk"
+          cp build-info.txt dist/
+          TAG="lichii-test-${{ github.run_number }}"
+          gh release delete "$TAG" --cleanup-tag --yes -R "$GITHUB_REPOSITORY" 2>/dev/null || true
+          gh release create "$TAG" dist/* -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --prerelease --latest=false \
+            --title "Lichii build-75 test ${{ github.run_number }}" \
+            --notes "Test build on zortos293/Lichii build-75 (c9ebb5c) with this fork's patches. Pre-release; main stays on Eglantine. No keys, firmware or games included."
 
       - name: Upload diagnostics
         if: always()

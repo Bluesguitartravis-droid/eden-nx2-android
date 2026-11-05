@@ -175,6 +175,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-hang-sample.py upstream
 
+      - name: nx2_switches.txt loader and NX2_GPU load logging
+        shell: bash
+        run: python3 scripts/apply-nx2-switches-and-gpu-stats.py upstream
+
       - name: GPU-thread profiler on (test builds)
         if: github.ref_name != 'main'
         shell: bash

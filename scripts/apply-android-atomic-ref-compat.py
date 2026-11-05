@@ -56,7 +56,9 @@ print("atomic_ref compat applied")
 # Android NDK libc++ also lacks std::atomic<std::shared_ptr<T>> (C++20). WindowTrace's
 # Sessions only loads and stores it, so a mutex around a plain shared_ptr is equivalent.
 trace = root / "src/core/arm/dynarmic/window_trace.h"
-if trace.exists():
+if trace.exists() and "std::atomic<std::shared_ptr" not in trace.read_text():
+    print("window_trace.h already avoids atomic shared_ptr; skipping")
+elif trace.exists():
     t = trace.read_text()
     replacements = [
         ("""        current.store(base != 0 ? std::make_shared<Session>(owner, base, next_id.fetch_add(1))

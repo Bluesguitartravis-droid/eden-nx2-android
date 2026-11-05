@@ -85,16 +85,16 @@ jobs:
       - name: Checkout build harness
         uses: actions/checkout@v4
 
-      - name: Clone Lichii build-75 base (test branch)
+      - name: Clone Lichii nx2 base (test branch)
         shell: bash
         run: |
           # Lichii is zortos293's continuation of Eglantine nx2 (9a435b5 is an ancestor).
           git clone --recursive --branch nx2 --single-branch \
             https://github.com/zortos293/Lichii.git upstream
-          git -C upstream checkout c9ebb5c3af672a0472ca0811392f04fab10203ab
+          git -C upstream checkout 27226d256
           git -C upstream submodule update --init --recursive
           echo "NX2_COMMIT=$(git -C upstream rev-parse HEAD)" >> "$GITHUB_ENV"
-          echo "NX2_UPSTREAM=zortos293/Lichii:build-75" >> "$GITHUB_ENV"
+          echo "NX2_UPSTREAM=zortos293/Lichii:nx2@27226d2" >> "$GITHUB_ENV"
           git -C upstream log -1 --oneline
 
       - name: Install host build tools
@@ -302,8 +302,8 @@ jobs:
           gh release delete "$TAG" --cleanup-tag --yes -R "$GITHUB_REPOSITORY" 2>/dev/null || true
           gh release create "$TAG" dist/* -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
             --prerelease --latest=false \
-            --title "Lichii build-75 test ${{ github.run_number }}" \
-            --notes "Test build on zortos293/Lichii build-75 (c9ebb5c) with this fork's patches. Pre-release; main stays on Eglantine. No keys, firmware or games included."
+            --title "Lichii nx2 test ${{ github.run_number }}" \
+            --notes "Test build on zortos293/Lichii nx2 (${NX2_COMMIT:0:9}) with this fork's patches. Pre-release; main stays on Eglantine. No keys, firmware or games included."
 
       - name: Upload diagnostics
         if: always()

@@ -33,9 +33,30 @@ std::string Nx2Describe(u64 pc) {
     return fmt::format("{:#x} (no image)", pc);
 }
 
+// The Eden log is written by a background thread and loses its tail when the
+// process dies, so the report is also written synchronously to nx2_crash.txt.
+char nx2_crash_path[1024]{};
+int nx2_crash_fd = -1;
+
+void Nx2CacheCrashPath() {
+    if (nx2_crash_path[0] != 0) {
+        return;
+    }
+    const auto path = (Common::FS::GetEdenPath(Common::FS::EdenPath::LogDir) / "nx2_crash.txt").string();
+    std::strncpy(nx2_crash_path, path.c_str(), sizeof(nx2_crash_path) - 1);
+}
+
 void Nx2FaultLine(const std::string& line) {
     __android_log_write(ANDROID_LOG_ERROR, "NX2_FAULT", line.c_str());
     LOG_ERROR(Core, "NX2_FAULT {}", line);
+    if (nx2_crash_fd < 0 && nx2_crash_path[0] != 0) {
+        nx2_crash_fd = open(nx2_crash_path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+    }
+    if (nx2_crash_fd >= 0) {
+        (void)!write(nx2_crash_fd, line.data(), line.size());
+        (void)!write(nx2_crash_fd, "\n", 1);
+        fsync(nx2_crash_fd);
+    }
 }
 
 void Nx2ReportHostFault(int sig, siginfo_t* info, void* raw_context) {
@@ -61,6 +82,30 @@ void Nx2ReportHostFault(int sig, siginfo_t* info, void* raw_context) {
         fp = frame[0];
     }
 }
+struct sigaction nx2_old_actions[32]{};
+
+// SIGABRT/SIGILL/SIGFPE never reach dynarmic's handler; report them, then
+// hand the signal to the previous handler (Android's debuggerd) as before.
+void Nx2OtherSignal(int sig, siginfo_t* info, void* raw_context) {
+    Nx2ReportHostFault(sig, info, raw_context);
+    sigaction(sig, &nx2_old_actions[sig], nullptr);
+    raise(sig);
+}
+
+void Nx2InstallOtherSignals() {
+    static bool installed = false;
+    if (installed) {
+        return;
+    }
+    installed = true;
+    for (int sig : {SIGABRT, SIGILL, SIGFPE}) {
+        struct sigaction sa{};
+        sa.sa_flags = SA_SIGINFO | SA_ONSTACK;
+        sa.sa_sigaction = Nx2OtherSignal;
+        sigemptyset(&sa.sa_mask);
+        sigaction(sig, &sa, &nx2_old_actions[sig]);
+    }
+}
 } // namespace
 #endif
 '''
@@ -71,9 +116,11 @@ t = t.replace(top, top + """#if defined(__ANDROID__) && defined(__aarch64__)
 #include <string>
 #include <android/log.h>
 #include <dlfcn.h>
+#include <fcntl.h>
 #include <sys/uio.h>
 #include <ucontext.h>
 #include <unistd.h>
+#include "common/fs/path_util.h"
 #endif
 """, 1)
 anchor = "std::optional<SigHandler> sig_handler;\n"
@@ -85,5 +132,13 @@ log = '    LOG_ERROR(Core, "Unhandled {} at {:#018x}\\n", sig == SIGSEGV ? "SIGS
 if log not in t:
     raise SystemExit("exception_handler_posix.cpp: Unhandled log line missing")
 t = t.replace(log, log + "#if defined(__ANDROID__) && defined(__aarch64__)\n    Nx2ReportHostFault(sig, info, raw_context);\n#endif\n", 1)
+reg = """void SigHandler::RegisterHandler() {
+    if (!sig_handler) {
+        sig_handler.emplace();
+    }
+"""
+if reg not in t:
+    raise SystemExit("exception_handler_posix.cpp: RegisterHandler shape changed")
+t = t.replace(reg, reg + "#if defined(__ANDROID__) && defined(__aarch64__)\n    Nx2CacheCrashPath();\n    Nx2InstallOtherSignals();\n#endif\n", 1)
 f.write_text(t)
 print("NX2_FAULT host crash report installed")

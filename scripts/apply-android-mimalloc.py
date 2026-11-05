@@ -38,6 +38,8 @@ set(MI_BUILD_SHARED OFF CACHE BOOL "" FORCE)
 set(MI_BUILD_STATIC ON CACHE BOOL "" FORCE)
 set(MI_BUILD_OBJECT OFF CACHE BOOL "" FORCE)
 set(MI_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+# libyuzu-android.so is dlopened: initial-exec TLS fails to load on bionic.
+set(MI_LOCAL_DYNAMIC_TLS ON CACHE BOOL "" FORCE)
 set(MI_INSTALL_TOPLEVEL OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(nx2_mimalloc
     URL https://github.com/microsoft/mimalloc/archive/refs/tags/v2.1.7.tar.gz

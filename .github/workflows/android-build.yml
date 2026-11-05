@@ -167,6 +167,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-hostmem-diag.py upstream
 
+      - name: Guest thread dump when presentation stops (NX2_HANG)
+        shell: bash
+        run: python3 scripts/apply-nx2-hang-watchdog.py upstream
+
       - name: Detect Android build requirements
         id: android_req
         shell: bash

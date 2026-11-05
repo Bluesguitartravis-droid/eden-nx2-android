@@ -18,12 +18,18 @@ This repository is an experimental community build project. It is not an officia
 
 ## Build status
 
-`main` builds from **Eglantine NX2** (commit `9a435b5`) with the Android patches described in
-[docs/EGLANTINE_BASE.md](docs/EGLANTINE_BASE.md). Every successful build on `main` is published as a
-GitHub release; the in-app updater follows those releases.
+`main` builds from **Lichii** (zortos293/Lichii `nx2`, commit `27226d2`), the continuation of Eglantine NX2,
+with the Android patches described in [docs/LICHII_BASE.md](docs/LICHII_BASE.md). Every successful build on
+`main` is published as a GitHub release; the in-app updater follows those releases.
 
-First confirmed Switch 2 result on the AYN Odin 3 Ultra: **Mario Tennis Fever** runs to its title
-screen at about 50 FPS (build 83). Launch Switch 2 games as loose folders and use the bundled Turnip
-driver.
+On the AYN Odin 3 Ultra (Adreno 830, Turnip):
+- **Mario Tennis Fever** runs to its title screen at about 50 FPS (first seen on build 83, also on NCE here).
+- **Donkey Kong Bananza** no longer crashes and shows graphics in gameplay, but is a slideshow (about 4-8 FPS):
+  set its CPU backend to **Dynarmic**, since it hangs on NCE.
+- **The Legend of Zelda: Ocarina of Time** (.nup) reaches its title screen on Dynarmic; after pressing start
+  the screen stays black.
 
+Launch Switch 2 games as loose folders (or .nup), and fully close the app before switching a game's CPU backend.
+
+The previous Eglantine base (builds 80-85) is documented in [docs/EGLANTINE_BASE.md](docs/EGLANTINE_BASE.md).
 The previous SX2A v0.3.2 baseline (build 69) is documented in [docs/SX2A_BASE.md](docs/SX2A_BASE.md).

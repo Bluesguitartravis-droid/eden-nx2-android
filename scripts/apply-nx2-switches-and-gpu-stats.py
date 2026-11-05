@@ -18,17 +18,35 @@ root = Path(sys.argv[1])
 jni = root / "src/android/app/src/main/jni"
 (jni / "nx2_switches.cpp").write_text(r'''// Eden NX2 Android: apply nx2_switches.txt (NAME=VALUE lines) as environment variables.
 #include <android/log.h>
+#include <cerrno>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
 
 namespace {
-constexpr const char* kSwitchesPath =
-    "/storage/emulated/0/Android/data/dev.eden.eden_emulator/files/nx2_switches.txt";
+// The app's own folder first; Download/ for file managers that cannot write into Android/data.
+constexpr const char* kSwitchesPaths[] = {
+    "/storage/emulated/0/Android/data/dev.eden.eden_emulator/files/nx2_switches.txt",
+    "/storage/emulated/0/Android/data/dev.eden.eden_emulator/files/nx2_switches.txt.txt",
+    "/storage/emulated/0/Download/nx2_switches.txt",
+    "/storage/emulated/0/Download/nx2_switches.txt.txt",
+    "/sdcard/Download/nx2_switches.txt",
+};
 
 __attribute__((constructor(101))) void Nx2ApplySwitches() {
-    FILE* file = std::fopen(kSwitchesPath, "r");
+    FILE* file = nullptr;
+    std::string tried;
+    for (const char* path : kSwitchesPaths) {
+        file = std::fopen(path, "r");
+        if (file != nullptr) {
+            tried += std::string{"using "} + path;
+            break;
+        }
+        tried += std::string{path} + ": " + std::strerror(errno) + "; ";
+    }
+    setenv("EDEN_NX2_ANDROID_SWITCHES_SOURCE", tried.c_str(), 1);
+    __android_log_print(ANDROID_LOG_INFO, "NX2_SWITCHES", "%s", tried.c_str());
     if (file == nullptr) {
         return;
     }
@@ -92,7 +110,13 @@ if "NX2_GPU busy" not in c:
                                 }
                                 return s;
                             };
-                            LOG_INFO(Core, "NX2_GPU busy={}% clk={} max={} temp={} switches=[{}]",
+                            static bool source_logged = false;
+                            if (!source_logged) {
+                                source_logged = true;
+                                const char* source = std::getenv("EDEN_NX2_ANDROID_SWITCHES_SOURCE");
+                                LOG_INFO(Core, "NX2_SWITCHES {}", source ? source : "(loader did not run)");
+                            }
+                            LOG_INFO(Core, "NX2_GPU busy={} clk={} max={} temp={} switches=[{}]",
                                      read_sys("/sys/class/kgsl/kgsl-3d0/gpu_busy_percentage"),
                                      read_sys("/sys/class/kgsl/kgsl-3d0/gpuclk"),
                                      read_sys("/sys/class/kgsl/kgsl-3d0/max_gpuclk"),

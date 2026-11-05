@@ -151,6 +151,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-android-atomic-ref-compat.py upstream
 
+      - name: Android libc++ int64/long long compatibility
+        shell: bash
+        run: python3 scripts/apply-android-int64-compat.py upstream
+
       - name: Detect Android build requirements
         id: android_req
         shell: bash

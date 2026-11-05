@@ -513,7 +513,9 @@ nce_new = '''#if defined(__ANDROID__)
     Settings::SetNceEnabled(is_39bit);
 #endif
 '''
-if "NX2 Android DKB diagnostic: forcing Dynarmic" not in deconstructed_text:
+# Disabled 2026-11-05: the main+0x5AF1C8 fault was DKB's incomplete romfs
+# (LocalizeHeapResource), not NCE. Forcing Dynarmic made DKB CPU-bound (~3 fps).
+if False and "NX2 Android DKB diagnostic: forcing Dynarmic" not in deconstructed_text:
     if nce_old not in deconstructed_text:
         print("NX2_PATCH_SKIP:", f"Could not find NCE enable point in {deconstructed}")
     deconstructed_text = deconstructed_text.replace(nce_old, nce_new, 1)
@@ -525,4 +527,4 @@ print(" - Switch 2 QueryPointerBufferSize = 0x10000")
 print(" - loose ExeFS Android library discovery restored")
 print(" - NUP added to Android file/container extension sets")
 print(" - save-data handoff diagnostics added")
-print(" - Android DKB forced to Dynarmic for NCE A/B diagnostics")
+print(" - (DKB keeps NCE; Dynarmic diagnostic disabled)")

@@ -163,6 +163,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-android-mimalloc.py upstream
 
+      - name: Fastmem mapping diagnostics (NX2_HOSTMEM)
+        shell: bash
+        run: python3 scripts/apply-nx2-hostmem-diag.py upstream
+
       - name: Detect Android build requirements
         id: android_req
         shell: bash

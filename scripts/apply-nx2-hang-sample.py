@@ -37,9 +37,23 @@ if "NX2_HANG sample" not in p:
                         m_core_index, thread->GetThreadId(), live.pc, live.lr, live.sp, live.r[0],
                         live.r[1], live.r[2]);
             interface->LogBacktrace(process);
+            // What a spinning thread polls: every register, and 32 bytes at those that point
+            // into guest memory.
+            auto& memory = process->GetMemory();
+            for (u32 r = 0; r < 31; ++r) {
+                const u64 value = r < 29 ? live.r[r] : (r == 29 ? live.fp : live.lr);
+                std::string words;
+                if (value >= 0x1000 && memory.IsValidVirtualAddressRange(value & ~u64{7}, 32)) {
+                    for (u64 i = 0; i < 4; ++i) {
+                        words += fmt::format(" {:016x}", memory.Read64((value & ~u64{7}) + i * 8));
+                    }
+                }
+                LOG_WARNING(Core, "NX2_HANG sample core {} x{}={:#x}{}{}", m_core_index, r, value,
+                            words.empty() ? "" : " ->", words);
+            }
         }
 """, 1)
-    p = p.replace('#include "common/settings.h"\n', '#include "common/settings.h"\n#include "common/nx2_watchdog.h"\n#include "common/logging.h"\n', 1)
+    p = p.replace('#include "common/settings.h"\n', '#include "common/settings.h"\n#include "common/nx2_watchdog.h"\n#include "common/logging.h"\n#include "core/memory.h"\n#include <string>\n', 1)
     pc.write_text(p)
 
 core = root / "src/core/core.cpp"

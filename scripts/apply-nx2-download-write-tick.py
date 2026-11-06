@@ -82,7 +82,7 @@ patch("buffer_cache/buffer_cache.h",
             // 1: the buffer's last GPU write, 2: its last use.
             static const int nx2_wait_mode = [] {
                 const char* v = std::getenv("EDEN_NX2_DOWNLOAD_WAIT");
-                const std::string_view mode{v ? v : "none"};
+                const std::string_view mode{v ? v : "write"};
                 return mode == "usage" ? 2 : mode == "write" ? 1 : 0;
             }();
             u64 nx2_tick = buffer.LastUsageTick();

@@ -218,6 +218,11 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nce-unmapped-access.py upstream
 
+      - name: Probe cooperative matrix support (test builds)
+        if: github.ref_name != 'main'
+        shell: bash
+        run: python3 scripts/apply-nx2-coopmat-probe.py upstream
+
       - name: Detect Android build requirements
         id: android_req
         shell: bash

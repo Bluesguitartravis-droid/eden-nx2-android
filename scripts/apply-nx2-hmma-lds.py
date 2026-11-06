@@ -27,7 +27,7 @@ def rep(old, new):
         raise SystemExit(f"emit_spirv_tensor.cpp shape changed near: {old[:70]!r}")
     t = t.replace(old, new, 1)
 
-rep('#include "common/common_types.h"\n', '#include "common/common_types.h"\n#include <cstdlib>\n')
+rep('#include "common/common_types.h"\n', '#include "common/common_types.h"\n#include "common/logging.h"\n#include <cstdlib>\n')
 
 rep('''    for (u32 variant = 0; variant < 2; ++variant) {
         if (!needed[variant]) continue;''', '''    // Eden NX2 Android (hmma_lds): gathers through workgroup memory in compute shaders.
@@ -55,6 +55,21 @@ rep('''    for (u32 variant = 0; variant < 2; ++variant) {
         lds_subgroup_size = ctx.AddGlobalVariable(input_ptr, spv::StorageClass::Input);
         ctx.Decorate(lds_subgroup_size, spv::Decoration::BuiltIn, spv::BuiltIn::SubgroupSize);
         ctx.interfaces.push_back(lds_subgroup_size);
+        // The program's other per-lane shuffles (LDSM / MOVM gathers lowered to ShuffleIndex)
+        // go through two alternating rows of workgroup memory too (emit_spirv_warp.cpp).
+        const u32 row_words = invocations + 128;
+        if (program.shared_memory_size + (lds_words + 2 * row_words) * 4 <= 32768) {
+            const Id rows = ctx.TypeArray(ctx.U32[1], ctx.Const(2 * row_words));
+            ctx.nx2_shuffle_lds = ctx.AddGlobalVariable(
+                ctx.TypePointer(spv::StorageClass::Workgroup, rows), spv::StorageClass::Workgroup);
+            ctx.interfaces.push_back(ctx.nx2_shuffle_lds);
+            ctx.nx2_shuffle_lds_ptr = lds_elem_ptr;
+            ctx.nx2_shuffle_row_words = row_words;
+            ctx.nx2_subgroup_id = lds_subgroup_id;
+            ctx.nx2_subgroup_size = lds_subgroup_size;
+        }
+        LOG_INFO(Shader_SPIRV, "NX2 HMMA through workgroup memory: {} invocations, shuffles {}",
+                 invocations, Sirit::ValidId(ctx.nx2_shuffle_lds) ? "too" : "not (shared memory full)");
     }
     for (u32 variant = 0; variant < 2; ++variant) {
         if (!needed[variant]) continue;''')
@@ -100,4 +115,47 @@ rep('''        ctx.AddLabel(end);
         std::array<Id, 2> packed;''')
 
 f.write_text(t)
+
+h = Path(sys.argv[1]) / "src/shader_recompiler/backend/spirv/spirv_emit_context.h"
+ht = h.read_text()
+anchor = "    bool uses_explicit_workgroup_layout{};\n"
+if "nx2_shuffle_lds" not in ht:
+    if anchor not in ht:
+        raise SystemExit("spirv_emit_context.h shape changed")
+    ht = ht.replace(anchor, anchor + """    // Eden NX2 Android: per-lane shuffles through workgroup memory (set by hmma_lds).
+    Id nx2_shuffle_lds{};
+    Id nx2_shuffle_lds_ptr{};
+    Id nx2_subgroup_id{};
+    Id nx2_subgroup_size{};
+    u32 nx2_shuffle_row_words{};
+    u32 nx2_shuffle_row{};
+""", 1)
+    h.write_text(ht)
+
+w = Path(sys.argv[1]) / "src/shader_recompiler/backend/spirv/emit_spirv_warp.cpp"
+wt = w.read_text()
+old_w = """Id ShuffleAbsolute(EmitContext& ctx, Id value, Id src_thread_id) {
+    if (!ctx.profile.has_broken_spirv_subgroup_shuffle) {"""
+new_w = """Id ShuffleAbsolute(EmitContext& ctx, Id value, Id src_thread_id) {
+    if (Sirit::ValidId(ctx.nx2_shuffle_lds)) {
+        // Eden NX2 Android: Turnip lowers a per-lane-index shuffle to a loop of rotates. Store
+        // to this call's row, subgroup barrier, load the source lane's word. Rows alternate, so
+        // a row is rewritten only after every lane has passed the next call's barrier.
+        const Id row_base{ctx.Const(ctx.nx2_shuffle_row * ctx.nx2_shuffle_row_words)};
+        ctx.nx2_shuffle_row ^= 1;
+        const Id group_base{ctx.OpIAdd(ctx.U32[1], row_base,
+            ctx.OpIMul(ctx.U32[1], ctx.OpLoad(ctx.U32[1], ctx.nx2_subgroup_id),
+                       ctx.OpLoad(ctx.U32[1], ctx.nx2_subgroup_size)))};
+        const Id own{ctx.OpIAdd(ctx.U32[1], group_base, GetThreadId(ctx))};
+        ctx.OpStore(ctx.OpAccessChain(ctx.nx2_shuffle_lds_ptr, ctx.nx2_shuffle_lds, own), value);
+        ctx.OpControlBarrier(ctx.Const(3U), ctx.Const(3U), ctx.Const(0x108U));
+        const Id src{ctx.OpIAdd(ctx.U32[1], group_base, src_thread_id)};
+        return ctx.OpLoad(ctx.U32[1],
+                          ctx.OpAccessChain(ctx.nx2_shuffle_lds_ptr, ctx.nx2_shuffle_lds, src));
+    }
+    if (!ctx.profile.has_broken_spirv_subgroup_shuffle) {"""
+if "nx2_shuffle_lds" not in wt:
+    if old_w not in wt:
+        raise SystemExit("emit_spirv_warp.cpp: ShuffleAbsolute shape changed")
+    w.write_text(wt.replace(old_w, new_w, 1))
 print("Software HMMA gathers through workgroup memory (hmma_lds)")

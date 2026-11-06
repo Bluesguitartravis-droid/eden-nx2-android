@@ -196,6 +196,11 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-dlss-skip-network.py upstream
 
+      - name: Profile GPU waits by call site
+        if: github.ref_name != 'main'
+        shell: bash
+        run: python3 scripts/apply-nx2-finish-sites.py upstream
+
       - name: Detect Android build requirements
         id: android_req
         shell: bash

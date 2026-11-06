@@ -208,6 +208,13 @@ jobs:
         run: |
           "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "ndk;${{ steps.android_req.outputs.ndk_version }}"
 
+      - name: Build FFmpeg with dav1d (AV1) for Android
+        shell: bash
+        run: |
+          ANDROID_NDK_DIR="$ANDROID_SDK_ROOT/ndk/${{ steps.android_req.outputs.ndk_version }}" \
+            bash scripts/build-android-ffmpeg-av1.sh "$GITHUB_WORKSPACE/ffmpeg-android"
+          python3 scripts/apply-android-ffmpeg-av1.py upstream "$GITHUB_WORKSPACE/ffmpeg-android"
+
       - name: Prepare Gradle
         shell: bash
         working-directory: upstream/src/android

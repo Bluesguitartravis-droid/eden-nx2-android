@@ -201,6 +201,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-finish-sites.py upstream
 
+      - name: Host-mapped buffer cache buffers on Adreno (unified memory)
+        shell: bash
+        run: python3 scripts/apply-nx2-mapped-buffers.py upstream
+
       - name: Detect Android build requirements
         id: android_req
         shell: bash

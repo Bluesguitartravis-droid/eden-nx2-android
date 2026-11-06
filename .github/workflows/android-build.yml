@@ -209,6 +209,11 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-download-write-tick.py upstream
 
+      - name: Video decoder trace on (test builds)
+        if: github.ref_name != 'main'
+        shell: bash
+        run: python3 scripts/apply-nx2-vdec-trace-on.py upstream
+
       - name: Detect Android build requirements
         id: android_req
         shell: bash

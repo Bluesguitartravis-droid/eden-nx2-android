@@ -192,6 +192,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-hmma-lds.py upstream
 
+      - name: Unroll the software HMMA K loop
+        shell: bash
+        run: python3 scripts/apply-nx2-hmma-unroll.py upstream
+
       - name: Skip the DLSS network when the replacement upscale draws
         shell: bash
         run: python3 scripts/apply-nx2-dlss-skip-network.py upstream

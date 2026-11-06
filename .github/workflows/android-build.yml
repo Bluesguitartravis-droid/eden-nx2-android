@@ -130,6 +130,10 @@ jobs:
           python3 scripts/apply-eglantine-switch2-regressions-tolerant.py upstream | tee regressions.log
           grep NX2_PATCH_SKIP regressions.log | sed 's/^/::warning title=patch-skip::/' || true
 
+      - name: Library ExeFS dedupe by base program ID
+        shell: bash
+        run: python3 scripts/apply-nx2-exefs-dedupe.py upstream
+
       - name: Enable direct ExeFS Android folder launch
         shell: bash
         run: |

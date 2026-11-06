@@ -51,9 +51,22 @@ if "NX2_HANG sample" not in p:
                 LOG_WARNING(Core, "NX2_HANG sample core {} x{}={:#x}{}{}", m_core_index, r, value,
                             words.empty() ? "" : " ->", words);
             }
+            // The code around pc and lr, to name the instruction a spinning thread repeats
+            // (an SVC, a counter read, a load-exclusive loop).
+            for (const auto [name, at] : {std::pair{"pc", live.pc}, std::pair{"lr", live.lr}}) {
+                const u64 base = (at & ~u64{3}) - 32;
+                if (at < 0x1000 || !memory.IsValidVirtualAddressRange(base, 64)) {
+                    continue;
+                }
+                std::string code;
+                for (u64 i = 0; i < 16; ++i) {
+                    code += fmt::format(" {:08x}", memory.Read32(base + i * 4));
+                }
+                LOG_WARNING(Core, "NX2_HANG sample core {} code {}-32:{}", m_core_index, name, code);
+            }
         }
 """, 1)
-    p = p.replace('#include "common/settings.h"\n', '#include "common/settings.h"\n#include "common/nx2_watchdog.h"\n#include "common/logging.h"\n#include "core/memory.h"\n#include <string>\n', 1)
+    p = p.replace('#include "common/settings.h"\n', '#include "common/settings.h"\n#include "common/nx2_watchdog.h"\n#include "common/logging.h"\n#include "core/memory.h"\n#include <string>\n#include <utility>\n', 1)
     pc.write_text(p)
 
 core = root / "src/core/core.cpp"

@@ -4,7 +4,8 @@ buffer's LastUsageTick: the last submission that used the buffer at all, reads i
 DKB on NCE then waits 350-640 ms of every second in ~2,600 such reads. The bytes being
 read only depend on the GPU's writes, so wait for the buffer's last GPU write instead:
 shader/transform-feedback writes (MarkWrittenBuffer), and GPU copies or clears into it.
-EDEN_NX2_DOWNLOAD_WAIT=usage restores the old wait."""
+EDEN_NX2_DOWNLOAD_WAIT=write waits for the last GPU write, =usage for the last use; the
+default reads the mapping without waiting."""
 from pathlib import Path
 import sys
 
@@ -77,17 +78,22 @@ patch("buffer_cache/buffer_cache.h",
 patch("buffer_cache/buffer_cache.h",
       """            runtime.Wait(buffer.LastUsageTick());
             if (nx2_profile) {""",
-      """            static const bool nx2_wait_usage = [] {
+      """            // 0: no wait (the GPU writes land in the mapping; the game syncs as on hardware),
+            // 1: the buffer's last GPU write, 2: its last use.
+            static const int nx2_wait_mode = [] {
                 const char* v = std::getenv("EDEN_NX2_DOWNLOAD_WAIT");
-                return v && std::string_view{v} == "usage";
+                const std::string_view mode{v ? v : "none"};
+                return mode == "usage" ? 2 : mode == "write" ? 1 : 0;
             }();
             u64 nx2_tick = buffer.LastUsageTick();
             if constexpr (requires { buffer.Nx2GpuWriteTick(); }) {
-                if (!nx2_wait_usage) {
+                if (nx2_wait_mode == 1) {
                     nx2_tick = buffer.Nx2GpuWriteTick();
                 }
             }
-            runtime.Wait(nx2_tick);
+            if (nx2_wait_mode != 0) {
+                runtime.Wait(nx2_tick);
+            }
             if (nx2_profile) {""",
       "EDEN_NX2_DOWNLOAD_WAIT")
 for rel, incs in (("renderer_vulkan/vk_buffer_cache.h", ["<algorithm>"]),

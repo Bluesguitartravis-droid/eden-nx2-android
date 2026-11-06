@@ -214,6 +214,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-vdec-trace-on.py upstream
 
+      - name: NCE unmapped accesses behave as on Dynarmic
+        shell: bash
+        run: python3 scripts/apply-nce-unmapped-access.py upstream
+
       - name: Detect Android build requirements
         id: android_req
         shell: bash

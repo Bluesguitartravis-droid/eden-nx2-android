@@ -184,6 +184,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-gpu-profile-on.py upstream
 
+      - name: Software HMMA through workgroup memory (Turnip)
+        shell: bash
+        run: python3 scripts/apply-nx2-hmma-lds.py upstream
+
       - name: Detect Android build requirements
         id: android_req
         shell: bash

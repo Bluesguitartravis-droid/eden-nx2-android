@@ -205,6 +205,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-mapped-buffers.py upstream
 
+      - name: Mapped buffer reads wait for the last GPU write
+        shell: bash
+        run: python3 scripts/apply-nx2-download-write-tick.py upstream
+
       - name: Detect Android build requirements
         id: android_req
         shell: bash

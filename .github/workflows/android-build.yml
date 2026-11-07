@@ -217,11 +217,6 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-download-write-tick.py upstream
 
-      - name: Video decoder trace on (test builds)
-        if: github.ref_name != 'main'
-        shell: bash
-        run: python3 scripts/apply-nx2-vdec-trace-on.py upstream
-
       - name: NCE unmapped accesses behave as on Dynarmic
         shell: bash
         run: python3 scripts/apply-nce-unmapped-access.py upstream

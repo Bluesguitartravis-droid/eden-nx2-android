@@ -96,6 +96,43 @@ patch("buffer_cache/buffer_cache.h",
             }
             if (nx2_profile) {""",
       "EDEN_NX2_DOWNLOAD_WAIT")
+# Newer Lichii batches mapped reads (several buffers) and ends them with a host-read barrier
+# plus a full Finish: DKB spent 100-190 ms/s there on build 121. Wait for the latest GPU write
+# among the buffers instead (every submission now ends with a host-read barrier).
+bc = root / "buffer_cache/buffer_cache.h"
+bt = bc.read_text()
+batch_old = """        if (staged.empty()) {
+            if constexpr (has_mapped) {
+                runtime.FinishForHostRead();
+            }
+        } else {"""
+batch_new = """        if (staged.empty()) {
+            if constexpr (has_mapped) {
+                const char* nx2_mode_env = std::getenv("EDEN_NX2_DOWNLOAD_WAIT");
+                const std::string_view nx2_mode{nx2_mode_env ? nx2_mode_env : "write"};
+                if (nx2_mode == "finish") {
+                    runtime.FinishForHostRead();
+                } else if (nx2_mode != "none") {
+                    u64 nx2_tick = 0;
+                    for (const auto& item : mapped) {
+                        Buffer& nx2_buffer = slot_buffers[item.buffer_id];
+                        u64 tick = nx2_buffer.LastUsageTick();
+                        if constexpr (requires { nx2_buffer.Nx2GpuWriteTick(); }) {
+                            if (nx2_mode == "write") {
+                                tick = nx2_buffer.Nx2GpuWriteTick();
+                            }
+                        }
+                        nx2_tick = (std::max)(nx2_tick, tick);
+                    }
+                    runtime.Wait(nx2_tick);
+                }
+            }
+        } else {"""
+if batch_old in bt and "nx2_mode_env" not in bt:
+    bt = bt.replace(batch_old, batch_new, 1)
+    bc.write_text(bt)
+    print("batched mapped reads wait for the last GPU write")
+
 for rel, incs in (("renderer_vulkan/vk_buffer_cache.h", ["<algorithm>"]),
                   ("buffer_cache/buffer_cache.h", ["<cstdlib>", "<string_view>"])):
     p = root / rel

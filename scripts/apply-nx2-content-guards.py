@@ -23,6 +23,15 @@ def replace_required(file: Path, old: str, new: str, label: str) -> None:
     print(f"Applied: {label}")
 
 
+def replace_optional(file: Path, old: str, new: str, label: str) -> None:
+    """For diagnostics that depend on a block upstream may have reshaped."""
+    data = file.read_text()
+    if old not in data and new not in data:
+        print(f"Skipped: {label} (block not present)")
+        return
+    replace_required(file, old, new, label)
+
+
 # The DKB failure resembles the one in Eglantine issue #335: a base-only RomFS
 # can contain Voice/Voxel/XLink yet lack the updated System/HeapSize and RSDB.
 # Probe the *mounted* (potentially patched) RomFS, not merely an NSP's filename.
@@ -92,7 +101,11 @@ new_open = """VirtualFile RomFSFactory::OpenCurrentProcess(u64 current_process_t
     }
     return mounted;
 }"""
-replace_required(romfs_cpp, old_open, new_open, "DKB effective RomFS mount probe")
+# Old DKB boot diagnostic; newer Lichii reshaped OpenCurrentProcess (LayeredFS for NUPs).
+if old_open in romfs_cpp.read_text() or new_open in romfs_cpp.read_text():
+    replace_required(romfs_cpp, old_open, new_open, "DKB effective RomFS mount probe")
+else:
+    print("Skipped: DKB effective RomFS mount probe (upstream reshaped OpenCurrentProcess)")
 
 # The original NSO loader asserted when LZ4/ZBIC failed, then still copied the
 # decompression buffer into guest code. It also used compressed-size headers to
@@ -310,7 +323,7 @@ replace_required(
     '#include <string>\n#include "core/file_sys/romfs.h"',
     "RomFS layout diagnostic string include",
 )
-replace_required(
+replace_optional(
     romfs_cpp,
     """        LOG_WARNING(Service_FS,
                     "NX2_ROMFS_PROBE DKB base_bytes={:#x} mounted_bytes={:#x} """,

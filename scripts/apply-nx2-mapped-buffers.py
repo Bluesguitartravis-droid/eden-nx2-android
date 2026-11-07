@@ -47,6 +47,41 @@ t = p.read_text()
 if "#include <cstdlib>" not in t:
     p.write_text("#include <cstdlib>\n" + t)
 
+# Newer Lichii (Frizti port, #194) makes the mapped read a host-read barrier plus a full
+# Finish, for MoltenVK. With every submission ending in that barrier (below), waiting for the
+# buffer's tick is enough: put the old wait back so the read waits only as far as needed.
+bc = root / "buffer_cache/buffer_cache.h"
+bt = bc.read_text()
+new_shape = """        if (const auto mapped = buffer.Mapped(); !mapped.empty()) {
+            runtime.FinishForHostRead();
+            for (const BufferCopy& copy : copies) {"""
+if new_shape in bt:
+    bt = bt.replace(new_shape, """        if (const auto mapped = buffer.Mapped(); !mapped.empty()) {
+            runtime.Wait(buffer.LastUsageTick());
+            for (const BufferCopy& copy : copies) {""", 1)
+    bc.write_text(bt)
+
+# Every submission ends with a host-read barrier, so a fence wait makes its writes visible
+# to the CPU through the mapping.
+sc = root / "renderer_vulkan/vk_scheduler.cpp"
+st = sc.read_text()
+if "NX2: make this submission's writes visible" not in st:
+    start = st.index("u64 Scheduler::SubmitExecution(")
+    end_at = st.index("        cmdbuf.End();\n", start)
+    st = st[:end_at] + """        {
+            // NX2: make this submission's writes visible to host reads of mapped buffers.
+            const VkMemoryBarrier nx2_host_read{
+                .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+                .pNext = nullptr,
+                .srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT,
+                .dstAccessMask = VK_ACCESS_HOST_READ_BIT,
+            };
+            cmdbuf.PipelineBarrier(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_HOST_BIT,
+                                   0, nx2_host_read);
+        }
+""" + st[end_at:]
+    sc.write_text(st)
+
 # Counters shared by the buffer cache (template header) and the scheduler report.
 patch("nx2_profile.h",
       "} // namespace VideoCommon::Nx2Profile",

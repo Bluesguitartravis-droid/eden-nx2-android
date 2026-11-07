@@ -163,7 +163,7 @@ h.write_text(ht)
 w = spirv / "emit_spirv_warp.cpp"
 wt = w.read_text()
 wt = rep(wt, """Id ShuffleAbsolute(EmitContext& ctx, Id value, Id src_thread_id) {
-    if (!ctx.profile.has_broken_spirv_subgroup_shuffle) {""", """Id ShuffleAbsolute(EmitContext& ctx, Id value, Id src_thread_id) {
+""", """Id ShuffleAbsolute(EmitContext& ctx, Id value, Id src_thread_id) {
     if (ctx.nx2_lds_mode != 0) {
         // Eden NX2 Android: Turnip lowers a per-lane-index shuffle to a loop of rotates. Store
         // this lane's word, subgroup barrier, load the source lane's, barrier (so a later
@@ -185,6 +185,6 @@ wt = rep(wt, """Id ShuffleAbsolute(EmitContext& ctx, Id value, Id src_thread_id)
         ctx.OpControlBarrier(barrier_scope, barrier_scope, semantics);
         return result;
     }
-    if (!ctx.profile.has_broken_spirv_subgroup_shuffle) {""", "emit_spirv_warp.cpp")
+""", "emit_spirv_warp.cpp")
 w.write_text(wt)
 print("HMMA and upscaler shuffles through workgroup memory (hmma_lds v3)")

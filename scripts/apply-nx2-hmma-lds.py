@@ -144,6 +144,16 @@ t = rep(t, '''        ctx.AddLabel(end);
             lds_barrier();
         }
         std::array<Id, 2> packed;''', "tensor")
+# Qualcomm's driver is marked as having broken subgroup shuffles, so every software HMMA
+# program was rejected there (Ocarina: 10 compute programs, black 3D view). The workgroup-memory
+# modes use no shuffle: only refuse when the program falls back to shuffles (mode 0).
+t = rep(t, """        if (!ctx.profile.SupportsSubgroupStage(program.stage) ||
+            ctx.profile.has_broken_spirv_subgroup_shuffle)
+            throw NotImplementedException("Software HMMA requires subgroup shuffle support");""",
+        """        if (ctx.nx2_lds_mode == 0 && (!ctx.profile.SupportsSubgroupStage(program.stage) ||
+                                      ctx.profile.has_broken_spirv_subgroup_shuffle))
+            throw NotImplementedException("Software HMMA requires subgroup shuffle support");""",
+        "HMMA shuffle requirement")
 f.write_text(t)
 
 h = spirv / "spirv_emit_context.h"

@@ -96,6 +96,10 @@ jobs:
           git -C upstream fetch -q origin fix/oot-upscaler-gathers
           git -C upstream -c user.name=ci -c user.email=ci@localhost \
             cherry-pick -X theirs df07b16ee 6a7953411 97b32079c 7459f10f1
+          # godpow's ARM64 macro JIT (Djihads80/Eglantine PR #503, from an Odin 3), with the
+          # split front using it; EDEN_NX2_MME_JIT=0 goes back to the interpreter.
+          git -C upstream -c user.name=ci -c user.email=ci@localhost \
+            am --3way "$GITHUB_WORKSPACE/patches/arm64-macro-jit.patch"
           git -C upstream submodule update --init --recursive
           echo "NX2_COMMIT=$(git -C upstream rev-parse HEAD)" >> "$GITHUB_ENV"
           echo "NX2_UPSTREAM=zortos293/Lichii:nx2@9fa4a71+oot-upscaler-gathers" >> "$GITHUB_ENV"

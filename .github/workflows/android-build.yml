@@ -204,6 +204,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-hmma-unroll.py upstream
 
+      - name: Slow Ocarina compute shaders unoptimized on Adreno; log compute builds
+        shell: bash
+        run: python3 scripts/apply-nx2-slow-compile.py upstream
+
       - name: Skip the DLSS network when the replacement upscale draws
         shell: bash
         run: python3 scripts/apply-nx2-dlss-skip-network.py upstream

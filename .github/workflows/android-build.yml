@@ -241,6 +241,11 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-coopmat-probe.py upstream
 
+      - name: Flush every log line (test builds)
+        if: github.ref_name != 'main'
+        shell: bash
+        run: python3 scripts/apply-nx2-log-flush.py upstream
+
       - name: Detect Android build requirements
         id: android_req
         shell: bash

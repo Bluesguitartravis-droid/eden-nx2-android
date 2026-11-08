@@ -100,6 +100,12 @@ jobs:
           # split front using it; EDEN_NX2_MME_JIT=0 goes back to the interpreter.
           git -C upstream -c user.name=ci -c user.email=ci@localhost \
             am --3way "$GITHUB_WORKSPACE/patches/arm64-macro-jit.patch"
+          # godpow's memory, texture and stability fixes from the same PR: large texture arrays
+          # backed on phones (Mario Kart World's black roads), lower mips kept for images the host
+          # cannot create, memory budget without VK_EXT_memory_budget, freed guest memory
+          # returned, staging buffer fixes, macro bind bounds.
+          git -C upstream -c user.name=ci -c user.email=ci@localhost \
+            am --3way "$GITHUB_WORKSPACE/patches/godpow-memory-textures.patch"
           git -C upstream submodule update --init --recursive
           echo "NX2_COMMIT=$(git -C upstream rev-parse HEAD)" >> "$GITHUB_ENV"
           echo "NX2_UPSTREAM=zortos293/Lichii:nx2@9fa4a71+oot-upscaler-gathers" >> "$GITHUB_ENV"

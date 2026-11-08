@@ -102,6 +102,9 @@ jobs:
           # returned, staging buffer fixes, macro bind bounds.
           git -C upstream -c user.name=ci -c user.email=ci@localhost \
             am --3way "$GITHUB_WORKSPACE/patches/godpow-memory-textures.patch"
+          # Test: upstream's sorted-array RangeSet (#481). Since 131 each NCE fault on GPU-tracked
+          # memory costs 4-5x more (DKB 500-1,170 ms/s in the handler, MKW ~700 ms/s).
+          git -C upstream -c user.name=ci -c user.email=ci@localhost revert --no-edit 47a1f19d54
           git -C upstream submodule update --init --recursive
           echo "NX2_COMMIT=$(git -C upstream rev-parse HEAD)" >> "$GITHUB_ENV"
           echo "NX2_UPSTREAM=zortos293/Lichii:nx2@bf4c42e+godpow" >> "$GITHUB_ENV"

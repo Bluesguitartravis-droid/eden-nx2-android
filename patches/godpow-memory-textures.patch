@@ -1,7 +1,7 @@
 From 2a95b876c541b191f9179b7c45979536fdbbe963 Mon Sep 17 00:00:00 2001
 From: ZnOw01 <ZnOw01@users.noreply.github.com>
 Date: Sat, 31 Oct 2026 11:02:42 -0500
-Subject: [PATCH 01/17] video_core: bound macro binds and discard misparsed
+Subject: [PATCH 01/18] video_core: bound macro binds and discard misparsed
  host blocks
 
 Maxwell3D::ProcessMacroBind wrote positions[start_address_ptr++] without
@@ -150,10 +150,11 @@ index bb24bc948..d0b591a4f 100644
 -- 
 2.43.0
 
+
 From e77a5c4dab8cfdd0d1acdc6fd5e84fafe3b603ca Mon Sep 17 00:00:00 2001
 From: godpow <17231911+godpow@users.noreply.github.com>
 Date: Sun, 1 Nov 2026 00:55:23 -0400
-Subject: [PATCH 02/17] vulkan_device: memory use and budget without
+Subject: [PATCH 02/18] vulkan_device: memory use and budget without
  VK_EXT_memory_budget
 
 Qualcomm's driver has no VK_EXT_memory_budget. The texture cache then
@@ -243,10 +244,11 @@ index a940e4d85..6626648c6 100644
 -- 
 2.43.0
 
+
 From 6f8167e79fff710399e816f74bc1490cef524d02 Mon Sep 17 00:00:00 2001
 From: godpow <17231911+godpow@users.noreply.github.com>
 Date: Sun, 1 Nov 2026 01:12:34 -0400
-Subject: [PATCH 03/17] vulkan_device: cap an integrated GPU's memory budget at
+Subject: [PATCH 03/18] vulkan_device: cap an integrated GPU's memory budget at
  a quarter of RAM
 
 A phone GPU shares the RAM a Switch 2 program's 12 GiB of guest memory
@@ -317,10 +319,11 @@ index 70698ad58..8477276ce 100644
 -- 
 2.43.0
 
+
 From f7005e33007ad160ab0b7703f4606214d2e7318c Mon Sep 17 00:00:00 2001
 From: godpow <17231911+godpow@users.noreply.github.com>
 Date: Sun, 1 Nov 2026 02:50:30 -0500
-Subject: [PATCH 04/17] kernel: Give freed guest memory back to the host
+Subject: [PATCH 04/18] kernel: Give freed guest memory back to the host
 
 Pages whose last reference went returned to the kernel's free lists
 but stayed resident on the host until reused. Mario Kart World's guest
@@ -429,10 +432,11 @@ index 66b97fef8..42cc14432 100644
 -- 
 2.43.0
 
+
 From 41ca5c56edbe565153d26016bfcf34af943c895b Mon Sep 17 00:00:00 2001
 From: godpow <17231911+godpow@users.noreply.github.com>
 Date: Sun, 1 Nov 2026 04:06:04 -0500
-Subject: [PATCH 05/17] texture_cache: Count what host images really take
+Subject: [PATCH 05/18] texture_cache: Count what host images really take
 
 The collector's memory total counted each image at its guest size: a
 trimmed image (reduce_texture_resolution) at four times what it takes,
@@ -530,10 +534,11 @@ index 7b94bb97f..0f66641b3 100644
 -- 
 2.43.0
 
+
 From 6b45fc31fc86a0456ed48baaec40b2ce35f2e796 Mon Sep 17 00:00:00 2001
 From: godpow <17231911+godpow@users.noreply.github.com>
 Date: Sun, 1 Nov 2026 05:31:30 -0500
-Subject: [PATCH 06/17] vulkan: Give staging buffers back sooner
+Subject: [PATCH 06/18] vulkan: Give staging buffers back sooner
 
 The staging pool visited one of its 64 size classes a frame and freed
 16 buffers there at most: the buffers a burst of uploads made, loading
@@ -654,10 +659,11 @@ index 0fb9b99b0..a627e67ba 100644
 -- 
 2.43.0
 
+
 From 6e5b69f07d1f1d7a751d2e030c0e54eef7858ea9 Mon Sep 17 00:00:00 2001
 From: godpow <17231911+godpow@users.noreply.github.com>
 Date: Sun, 1 Nov 2026 23:26:51 -0500
-Subject: [PATCH 07/17] vulkan: Keep no idle staging buffers of 16 MiB or more
+Subject: [PATCH 07/18] vulkan: Keep no idle staging buffers of 16 MiB or more
 
 e6f27d4b5d kept one idle staging buffer of each size of 16 MiB or more
 for reuse. Sizes are powers of two, so one large image's upload made a
@@ -698,10 +704,11 @@ index ff820b031..248f47a9f 100644
 -- 
 2.43.0
 
+
 From 132e3da4a36dc5286b12e4cacb7a6cdacab46d5d Mon Sep 17 00:00:00 2001
 From: godpow <17231911+godpow@users.noreply.github.com>
 Date: Tue, 3 Nov 2026 05:37:09 -0500
-Subject: [PATCH 08/17] kernel: give freed guest memory back to the host on
+Subject: [PATCH 08/18] kernel: give freed guest memory back to the host on
  Android only
 
 Desktop keeps freed pages resident for reuse, as before.
@@ -741,10 +748,11 @@ index b6606fd29..5e0a8b837 100644
 -- 
 2.43.0
 
+
 From 6006572903f9b167f16984485c66fd728c476fb0 Mon Sep 17 00:00:00 2001
 From: godpow <17231911+godpow@users.noreply.github.com>
 Date: Tue, 3 Nov 2026 22:36:10 -0500
-Subject: [PATCH 09/17] vk_staging_buffer_pool: recheck region 0 after a wrap
+Subject: [PATCH 09/18] vk_staging_buffer_pool: recheck region 0 after a wrap
  that fell back
 
 When the stream buffer wraps, GetStreamBuffer checks regions 0 to
@@ -792,10 +800,11 @@ index 248f47a9f..9f09d8385 100644
 -- 
 2.43.0
 
+
 From 25ea27e33657336d992dcecdc5e8ede4ba721a3c Mon Sep 17 00:00:00 2001
 From: godpow <17231911+godpow@users.noreply.github.com>
 Date: Wed, 4 Nov 2026 21:59:55 -0500
-Subject: [PATCH 10/17] video_core: a write to a sparse block that got no
+Subject: [PATCH 10/18] video_core: a write to a sparse block that got no
  memory is dropped, not asserted
 
 When no spare block was ready in time, BackSparseWrite left the block empty
@@ -833,10 +842,11 @@ index ba406b22f..e11d1e5d5 100644
 -- 
 2.43.0
 
+
 From cd3573708bfa9b42f93b8724fdc5660188934f27 Mon Sep 17 00:00:00 2001
 From: godpow <17231911+godpow@users.noreply.github.com>
 Date: Sat, 31 Oct 2026 07:03:53 -0400
-Subject: [PATCH 11/17] texture_cache: keep the lower levels of images the host
+Subject: [PATCH 11/18] texture_cache: keep the lower levels of images the host
  cannot create
 
 An image larger than the sparse address space (the Qualcomm driver also
@@ -1078,10 +1088,11 @@ index 6626648c6..4a17a34fd 100644
 -- 
 2.43.0
 
+
 From 3053b916b72279645d5fc8e3f5c5f11162894916 Mon Sep 17 00:00:00 2001
 From: godpow <17231911+godpow@users.noreply.github.com>
 Date: Sat, 31 Oct 2026 07:34:57 -0400
-Subject: [PATCH 12/17] vulkan: back large texture arrays on phones instead of
+Subject: [PATCH 12/18] vulkan: back large texture arrays on phones instead of
  leaving them black
 
 Mario Kart World's terrain textures are 8192x8192x68 arrays. On a GPU
@@ -1288,10 +1299,11 @@ index 8ab12bcbf..964044111 100644
 -- 
 2.43.0
 
+
 From c300940fbbbe7691b51885052a3c5d2e38182eea Mon Sep 17 00:00:00 2001
 From: arisqz <aris.tsois2020@gmail.com>
 Date: Fri, 30 Oct 2026 22:58:11 +0100
-Subject: [PATCH 13/17] Fixed black textures on AMD
+Subject: [PATCH 13/18] Fixed black textures on AMD
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
@@ -1357,10 +1369,11 @@ index 003f763d7..59d7cbc32 100644
 -- 
 2.43.0
 
+
 From 0866fc68707274a69c6f24b104ecbdf965505629 Mon Sep 17 00:00:00 2001
 From: godpow <17231911+godpow@users.noreply.github.com>
 Date: Wed, 4 Nov 2026 03:14:59 -0500
-Subject: [PATCH 14/17] vulkan: a written sparse-layers image whose layers
+Subject: [PATCH 14/18] vulkan: a written sparse-layers image whose layers
  failed is backed, not left unwritten
 
 On a phone (backable) a SparseLayers image whose InitSparseLayers failed skipped
@@ -1412,10 +1425,11 @@ index 59d7cbc32..f6ced32f3 100644
 -- 
 2.43.0
 
+
 From 73277087661d18235de41f2315ed6b35f01a4815 Mon Sep 17 00:00:00 2001
 From: godpow <17231911+godpow@users.noreply.github.com>
 Date: Wed, 4 Nov 2026 03:26:48 -0500
-Subject: [PATCH 15/17] vulkan: back out backing a written sparse-layers image
+Subject: [PATCH 15/18] vulkan: back out backing a written sparse-layers image
  whose layers failed
 
 e7502d45ee let a written layered-sparse image on a phone fall through to the
@@ -1469,10 +1483,11 @@ index f6ced32f3..59d7cbc32 100644
 -- 
 2.43.0
 
+
 From ac350b54daaeb0a794fd33af2a2bb70a84742265 Mon Sep 17 00:00:00 2001
 From: godpow <17231911+godpow@users.noreply.github.com>
 Date: Sun, 1 Nov 2026 01:19:47 -0500
-Subject: [PATCH 16/17] Add two settings that save memory for Switch 2 titles
+Subject: [PATCH 16/18] Add two settings that save memory for Switch 2 titles
 
 Loading a Mario Kart World race takes its process to 19-20 GB, and a
 24 GiB phone kills it. Both settings are off by default, switchable per
@@ -1872,10 +1887,11 @@ index a010e29a4..18b773a1a 100644
 -- 
 2.43.0
 
+
 From eabf83da96296e2174e8264fdcdfb74170450701 Mon Sep 17 00:00:00 2001
 From: godpow <17231911+godpow@users.noreply.github.com>
 Date: Sun, 1 Nov 2026 03:24:15 -0500
-Subject: [PATCH 17/17] texture_cache: release_gpu_only_memory covers whole
+Subject: [PATCH 17/18] texture_cache: release_gpu_only_memory covers whole
  GPU-only regions
 
 The setting only looked at images in sparse regions, and those are
@@ -2004,6 +2020,56 @@ index 25ea70501..9f0c06c22 100644
      MarkModification(image);
      device_memory.ReleaseMemory(image.cpu_addr, image.guest_size_bytes);
  }
+-- 
+2.43.0
+
+
+From 226df40965444568d92e75e04596fbbb42ab7ad4 Mon Sep 17 00:00:00 2001
+From: ci <ci@localhost>
+Date: Sat, 7 Nov 2026 18:19:40 -0800
+Subject: [PATCH 18/18] vulkan: pass back_huge through AllocateImage
+
+---
+ src/video_core/vulkan_common/vulkan_memory_allocator.cpp | 4 ++--
+ src/video_core/vulkan_common/vulkan_memory_allocator.h   | 3 ++-
+ 2 files changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/src/video_core/vulkan_common/vulkan_memory_allocator.cpp b/src/video_core/vulkan_common/vulkan_memory_allocator.cpp
+index 8f8e2ecd1..60392f847 100644
+--- a/src/video_core/vulkan_common/vulkan_memory_allocator.cpp
++++ b/src/video_core/vulkan_common/vulkan_memory_allocator.cpp
+@@ -210,7 +210,7 @@ vk::Image MemoryAllocator::CreateImage(const VkImageCreateInfo &ci, bool dedicat
+                                        bool back_huge) const
+ {
+     vk::Image image;
+-    vk::Check(AllocateImage(ci, dedicated, image));
++    vk::Check(AllocateImage(ci, dedicated, image, back_huge));
+     return image;
+ }
+ 
+@@ -224,7 +224,7 @@ vk::Image MemoryAllocator::TryCreateImage(const VkImageCreateInfo &ci, bool dedi
+ }
+ 
+ VkResult MemoryAllocator::AllocateImage(const VkImageCreateInfo &ci, bool dedicated,
+-                                        vk::Image &image) const {
++                                        vk::Image &image, bool back_huge) const {
+     const VmaAllocationCreateInfo alloc_ci = {
+             // Best fit: images freed by the thousand leave holes in the blocks, which new ones
+             // should fill before VMA takes another block.
+diff --git a/src/video_core/vulkan_common/vulkan_memory_allocator.h b/src/video_core/vulkan_common/vulkan_memory_allocator.h
+index 964044111..cec1e5054 100644
+--- a/src/video_core/vulkan_common/vulkan_memory_allocator.h
++++ b/src/video_core/vulkan_common/vulkan_memory_allocator.h
+@@ -175,7 +175,8 @@ namespace Vulkan {
+         }
+ 
+         /// CreateImage's fallbacks; the image is left null when the result is an error.
+-        VkResult AllocateImage(const VkImageCreateInfo &ci, bool dedicated, vk::Image &image) const;
++        VkResult AllocateImage(const VkImageCreateInfo &ci, bool dedicated, vk::Image &image,
++                               bool back_huge = false) const;
+ 
+         const Device &device;                              ///< Device handle.
+         VmaAllocator allocator;                           ///< VMA allocator.
 -- 
 2.43.0
 

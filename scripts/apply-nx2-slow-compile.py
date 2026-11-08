@@ -73,4 +73,46 @@ if "NX2 compute build start" not in t:
     if "#include <chrono>" not in t:
         t = "#include <chrono>\n" + t
     c.write_text(t)
+
+# Graphics pipelines: Ocarina's stall is in the VkPipelineBuild workers (graphics), which then
+# abort on Qualcomm's driver. Log each build's stage hashes at its start, and build unoptimized
+# when any stage hash is listed (EDEN_NX2_UNOPTIMIZED or the shared list).
+g = root / "vk_graphics_pipeline.cpp"
+t = g.read_text()
+old = """    if (uses_descriptor_buffer) {
+        flags |= VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT;
+    }
+
+    pipeline = device.GetLogical().CreateGraphicsPipeline({"""
+new = """    if (uses_descriptor_buffer) {
+        flags |= VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT;
+    }
+    {
+        std::string nx2_stages;
+        for (const u64 stage_hash : key.unique_hashes) {
+            if (stage_hash == 0) {
+                continue;
+            }
+            nx2_stages += fmt::format(" {:016x}", stage_hash);
+            if (BuildsUnoptimized(device.GetDriverID(), stage_hash)) {
+                flags |= VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT;
+            }
+        }
+        LOG_INFO(Render_Vulkan, "NX2 graphics build start {:016x} stages:{}{}", key.Hash(),
+                 nx2_stages,
+                 (flags & VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT) != 0 ? " (unoptimized)" : "");
+    }
+
+    pipeline = device.GetLogical().CreateGraphicsPipeline({"""
+if "NX2 graphics build start" not in t:
+    if old not in t:
+        raise SystemExit("graphics pipeline flags shape changed")
+    t = t.replace(old, new, 1)
+    if "pipeline_optimization.h" not in t:
+        t = t.replace('#include "video_core/renderer_vulkan/vk_graphics_pipeline.h"\n',
+                      '#include "video_core/renderer_vulkan/vk_graphics_pipeline.h"\n'
+                      '#include "video_core/renderer_vulkan/pipeline_optimization.h"\n', 1)
+        if "pipeline_optimization.h" not in t:
+            raise SystemExit("could not include pipeline_optimization.h")
+    g.write_text(t)
 print("slow compute shaders built unoptimized on Adreno; compute builds logged")

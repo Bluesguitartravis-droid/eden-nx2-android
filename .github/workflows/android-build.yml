@@ -296,7 +296,18 @@ jobs:
           set -o pipefail
           # CMake configure stages SDL's Java sources into externals/generated/sdl/java.
           # It is fast compared with the full 1,700+ object native build.
-          ./gradlew 'app:configureCMakeRelWithDebInfo[arm64-v8a]' --stacktrace --no-daemon 2>&1 | tee "$GITHUB_WORKSPACE/android-build.log"
+          # Dependencies come from GitHub release downloads, which sometimes fail for an hour
+          # (502/504). Each configure keeps what it fetched, so retry it with growing pauses.
+          for attempt in 1 2 3 4 5 6 7 8; do
+            if ./gradlew 'app:configureCMakeRelWithDebInfo[arm64-v8a]' --stacktrace --no-daemon 2>&1 | tee "$GITHUB_WORKSPACE/android-build.log"; then
+              break
+            fi
+            if [ "$attempt" = 8 ] || ! grep -qE "cannot compute hash on failed download|Failed to download" "$GITHUB_WORKSPACE/android-build.log"; then
+              exit 1
+            fi
+            echo "Dependency download failed (attempt $attempt); retrying in $((attempt * 60)) s"
+            sleep $((attempt * 60))
+          done
           ./gradlew app:compileMainlineReleaseKotlin --stacktrace --no-daemon 2>&1 | tee -a "$GITHUB_WORKSPACE/android-build.log"
 
       - name: Build standard ARM64 APK

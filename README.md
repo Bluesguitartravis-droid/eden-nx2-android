@@ -37,7 +37,7 @@ asynchronous GPU emulation on, and the Turnip driver unless noted. Build 131 res
 | Donkey Kong Bananza | Playable in levels; some fur flicker/stretching | 16-20 FPS in levels (up to ~32 depending on view), 60 FPS title screen. Was ~4 FPS on build 99. |
 | Mario Kart World | Races run; roads can turn black and some objects pop in/out; device loss on Qualcomm's stock driver | ~38-46 FPS |
 | The Legend of Zelda: Ocarina of Time (.nup) | Reaches the opening video, then stalls compiling shaders; Turnip V34/v37 crash in the shader compiler | Not playable yet |
-| Mario Tennis Fever | Runs to its title screen (build 83 onward) | ~50 FPS |
+| Mario Tennis Fever | Playable: a full match plays through; some textures pop in and out | Never below 50 FPS in a full match |
 | Fire Emblem: Fortune's Weave | Under test | - |
 
 ## Tips

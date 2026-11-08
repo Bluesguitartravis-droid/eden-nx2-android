@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Ocarina: as its AV1 intro starts, both pipeline build threads sat at 100% for 30-60 s on
-Qualcomm's driver and on Turnip (Turnip then crashed in its compiler). Upstream found the same
-two compute shaders taking 6 and 18 minutes on AMD (#200) and builds them with
-VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT there. Do the same on Qualcomm and Turnip, accept
-more hashes from EDEN_NX2_UNOPTIMIZED (comma-separated hex), and log every compute build that
-takes over 500 ms plus the start of each one, so a build that never ends is named in the log."""
+"""Ocarina: as its AV1 intro starts, both pipeline build threads sat at 100% for 20-60 s on
+Qualcomm's driver and on Turnip, which then crashed in its compiler. Upstream builds two compute
+shaders with VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT on AMD for the same stall (#200).
+
+- BuildsUnoptimized: Adreno drivers too, and any stage hash listed in EDEN_NX2_UNOPTIMIZED
+  (comma-separated hex); graphics pipelines consult it per stage.
+- Upstream's build trace (EDEN_NX2_PIPELINE_BUILD_TRACE=<file>) also goes to the log when no
+  file is given, so the last BEGIN without an END in a crash log names the shader."""
 from pathlib import Path
 import sys
 
@@ -14,8 +16,8 @@ h = root / "pipeline_optimization.h"
 t = h.read_text()
 old = """    return driver_id == VK_DRIVER_ID_AMD_PROPRIETARY &&
            std::ranges::find(amd_proprietary, shader_hash) != amd_proprietary.end();"""
-new = """    // NX2: the same two shaders stall Adreno's compilers (Qualcomm's and Turnip) for a minute
-    // or crash them; EDEN_NX2_UNOPTIMIZED adds more (comma-separated hex hashes).
+new = """    // NX2: Adreno's compilers (Qualcomm's and Turnip) stall or crash on Ocarina's shaders too;
+    // EDEN_NX2_UNOPTIMIZED adds more (comma-separated hex hashes).
     static const std::vector<u64> nx2_extra = [] {
         std::vector<u64> out;
         if (const char* v = std::getenv("EDEN_NX2_UNOPTIMIZED")) {
@@ -23,7 +25,8 @@ new = """    // NX2: the same two shaders stall Adreno's compilers (Qualcomm's a
             size_t pos = 0;
             while (pos < s.size()) {
                 const size_t end = s.find(',', pos);
-                const std::string item = s.substr(pos, end == std::string::npos ? end : end - pos);
+                const std::string item =
+                    s.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
                 if (!item.empty()) {
                     out.push_back(std::strtoull(item.c_str(), nullptr, 16));
                 }
@@ -46,73 +49,61 @@ if "EDEN_NX2_UNOPTIMIZED" not in t:
     if old not in t:
         raise SystemExit("BuildsUnoptimized shape changed")
     t = t.replace(old, new, 1)
-    t = t.replace("#include <array>\n", "#include <array>\n#include <cstdlib>\n#include <string>\n#include <vector>\n", 1)
+    t = t.replace("#include <array>\n",
+                  "#include <array>\n#include <cstdlib>\n#include <string>\n#include <vector>\n", 1)
     h.write_text(t)
 
-c = root / "vk_compute_pipeline.cpp"
-t = c.read_text()
-old = """        try {
-            pipeline = device.GetLogical().CreateComputePipeline(compute_ci, *pipeline_cache);
-        } catch (const vk::Exception& exception) {"""
-new = """        const auto nx2_build_start = std::chrono::steady_clock::now();
-        LOG_INFO(Render_Vulkan, "NX2 compute build start {:016x}{}", shader_hash,
-                 (flags & VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT) != 0 ? " (unoptimized)" : "");
-        try {
-            pipeline = device.GetLogical().CreateComputePipeline(compute_ci, *pipeline_cache);
-            const double nx2_ms = std::chrono::duration<double, std::milli>(
-                std::chrono::steady_clock::now() - nx2_build_start).count();
-            if (nx2_ms > 500.0) {
-                LOG_WARNING(Render_Vulkan, "NX2 compute build slow {:016x}: {:.0f} ms", shader_hash,
-                            nx2_ms);
-            }
-        } catch (const vk::Exception& exception) {"""
-if "NX2 compute build start" not in t:
-    if old not in t:
-        raise SystemExit("compute pipeline creation shape changed")
-    t = t.replace(old, new, 1)
-    if "#include <chrono>" not in t:
-        t = "#include <chrono>\n" + t
-    c.write_text(t)
-
-# Graphics pipelines: Ocarina's stall is in the VkPipelineBuild workers (graphics), which then
-# abort on Qualcomm's driver. Log each build's stage hashes at its start, and build unoptimized
-# when any stage hash is listed (EDEN_NX2_UNOPTIMIZED or the shared list).
 g = root / "vk_graphics_pipeline.cpp"
 t = g.read_text()
-old = """    if (uses_descriptor_buffer) {
-        flags |= VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT;
-    }
-
-    pipeline = device.GetLogical().CreateGraphicsPipeline({"""
-new = """    if (uses_descriptor_buffer) {
-        flags |= VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT;
-    }
-    {
-        std::string nx2_stages;
-        for (const u64 stage_hash : key.unique_hashes) {
-            if (stage_hash == 0) {
-                continue;
-            }
-            nx2_stages += fmt::format(" {:016x}", stage_hash);
-            if (BuildsUnoptimized(device.GetDriverID(), stage_hash)) {
-                flags |= VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT;
-            }
+old = """    const bool unoptimized = (flags & VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT) != 0;
+    const auto trace_begin = std::chrono::steady_clock::now();
+    TracePipelineBuild("BEGIN", "graphics\""""
+new = """    for (const u64 nx2_stage_hash : key.unique_hashes) {
+        if (nx2_stage_hash != 0 && BuildsUnoptimized(device.GetDriverID(), nx2_stage_hash)) {
+            flags |= VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT;
         }
-        LOG_INFO(Render_Vulkan, "NX2 graphics build start {:016x} stages:{}{}", key.Hash(),
-                 nx2_stages,
-                 (flags & VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT) != 0 ? " (unoptimized)" : "");
     }
-
-    pipeline = device.GetLogical().CreateGraphicsPipeline({"""
-if "NX2 graphics build start" not in t:
+    const bool unoptimized = (flags & VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT) != 0;
+    const auto trace_begin = std::chrono::steady_clock::now();
+    TracePipelineBuild("BEGIN", "graphics\""""
+if "nx2_stage_hash" not in t:
     if old not in t:
-        raise SystemExit("graphics pipeline flags shape changed")
+        raise SystemExit("graphics pipeline trace shape changed")
     t = t.replace(old, new, 1)
     if "pipeline_optimization.h" not in t:
-        t = t.replace('#include "video_core/renderer_vulkan/vk_graphics_pipeline.h"\n',
-                      '#include "video_core/renderer_vulkan/vk_graphics_pipeline.h"\n'
-                      '#include "video_core/renderer_vulkan/pipeline_optimization.h"\n', 1)
-        if "pipeline_optimization.h" not in t:
-            raise SystemExit("could not include pipeline_optimization.h")
+        anchor = '#include "video_core/renderer_vulkan/vk_graphics_pipeline.h"\n'
+        if anchor not in t:
+            raise SystemExit("graphics pipeline include not found")
+        t = t.replace(anchor, anchor + '#include "video_core/renderer_vulkan/pipeline_optimization.h"\n', 1)
     g.write_text(t)
-print("slow compute shaders built unoptimized on Adreno; compute builds logged")
+
+tr = root / "pipeline_build_trace.h"
+t = tr.read_text()
+old = """    if (file == nullptr) {
+        return;
+    }"""
+new = """    if (file == nullptr) {
+        // NX2 test builds: into the log instead, starts and builds over 500 ms only.
+        if (elapsed_ms >= 0.0 && elapsed_ms < 500.0) {
+            return;
+        }
+        std::string stages;
+        for (size_t stage = 0; stage < stage_hashes.size(); ++stage) {
+            if (stage_hashes[stage] != 0) {
+                stages += fmt::format(" s{}:{:016x}", stage, stage_hashes[stage]);
+            }
+        }
+        LOG_INFO(Render_Vulkan, "NX2 pipeline build {} {} pipeline={:016x}{}{}{}", phase, kind,
+                 key_hash, unoptimized ? " unoptimized" : "", stages,
+                 elapsed_ms >= 0.0 ? fmt::format(" ms={:.0f}", elapsed_ms) : std::string{});
+        return;
+    }"""
+if "NX2 pipeline build" not in t:
+    if old not in t:
+        raise SystemExit("pipeline build trace shape changed")
+    t = t.replace(old, new, 1)
+    t = t.replace('#include "common/common_types.h"\n',
+                  '#include <string>\n#include <fmt/format.h>\n#include "common/common_types.h"\n'
+                  '#include "common/logging.h"\n', 1)
+    tr.write_text(t)
+print("slow pipeline builds: Adreno unoptimized list, EDEN_NX2_UNOPTIMIZED, build trace in the log")

@@ -91,11 +91,7 @@ jobs:
           # Lichii is zortos293's continuation of Eglantine nx2 (9a435b5 is an ancestor).
           git clone --recursive --branch nx2 --single-branch \
             https://github.com/zortos293/Lichii.git upstream
-          git -C upstream checkout 9fa4a71fa
-          # Ocarina's 1080p upscaler and shadow gathers (fix/oot-upscaler-gathers, not in nx2 yet).
-          git -C upstream fetch -q origin fix/oot-upscaler-gathers
-          git -C upstream -c user.name=ci -c user.email=ci@localhost \
-            cherry-pick -X theirs df07b16ee 6a7953411 97b32079c 7459f10f1
+          git -C upstream checkout bf4c42e22
           # godpow's ARM64 macro JIT (Djihads80/Eglantine PR #503, from an Odin 3), with the
           # split front using it; EDEN_NX2_MME_JIT=0 goes back to the interpreter.
           git -C upstream -c user.name=ci -c user.email=ci@localhost \
@@ -108,7 +104,7 @@ jobs:
             am --3way "$GITHUB_WORKSPACE/patches/godpow-memory-textures.patch"
           git -C upstream submodule update --init --recursive
           echo "NX2_COMMIT=$(git -C upstream rev-parse HEAD)" >> "$GITHUB_ENV"
-          echo "NX2_UPSTREAM=zortos293/Lichii:nx2@9fa4a71+oot-upscaler-gathers" >> "$GITHUB_ENV"
+          echo "NX2_UPSTREAM=zortos293/Lichii:nx2@bf4c42e+godpow" >> "$GITHUB_ENV"
           git -C upstream log -1 --oneline
 
       - name: Install host build tools
@@ -209,10 +205,6 @@ jobs:
       - name: Software HMMA through workgroup memory (Turnip)
         shell: bash
         run: python3 scripts/apply-nx2-hmma-lds.py upstream
-
-      - name: Unroll the software HMMA K loop
-        shell: bash
-        run: python3 scripts/apply-nx2-hmma-unroll.py upstream
 
       - name: Slow Ocarina compute shaders unoptimized on Adreno; log compute builds
         shell: bash

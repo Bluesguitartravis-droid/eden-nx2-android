@@ -123,7 +123,9 @@ if marker not in data:
         raise SystemExit(f"Could not find NSO decode loop in {nso_file}")
     original = data[start:end]
     if "ASSERT(r > 0)" not in original or "ASSERT(r == int(nso_header.segments[i].size))" not in original:
-        raise SystemExit("NSO decode loop shape differs; refusing an unsafe patch")
+        # Newer Lichii fails the NSO load itself when decompression fails (#160).
+        print("Skipped: NSO segment guard (upstream checks decompression itself)")
+        marker = None
     replacement = """    {
         // NX2 guarded NSO segment reads: malformed or unsupported compressed
         // segments must not silently become executable zero-filled memory.
@@ -253,13 +255,15 @@ if marker not in data:
         }
     }
 """
-    data = data[:start] + replacement + data[end:]
-    if "#include <limits>" not in data:
-        data = data.replace("#include <cstring>", "#include <cstring>\n#include <limits>", 1)
-    nso_file.write_text(data)
-    print("Applied: guarded NSO decompression and short-read checks")
+    if marker is not None:
+        data = data[:start] + replacement + data[end:]
+        if "#include <limits>" not in data:
+            data = data.replace("#include <cstring>", "#include <cstring>\n#include <limits>", 1)
+        nso_file.write_text(data)
+        print("Applied: guarded NSO decompression and short-read checks")
 else:
     print("Already applied: guarded NSO decompression and short-read checks")
+nso_guarded = "// NX2 guarded NSO segment reads" in data
 
 # Build 63: the Build 62 log shows 41,000+ unmapped writes when Dynarmic
 # ignores memory aborts. For DKB only, stop at the first invalid access and
@@ -375,7 +379,7 @@ nso_probe = """                    if (result != static_cast<int>(decoded_size))
                                   source_offset + source_size, file_size);
                         LOG_ERROR(Loader,
                                   "NSO {} segment {} decompression failed: got={} """""
-if "NX2_NSO_INPUT" not in data:
+if nso_guarded and "NX2_NSO_INPUT" not in data:
     if nso_failure not in data:
         raise SystemExit("Could not find NSO failure logging insertion point")
     data = data.replace(nso_failure, nso_probe, 1)

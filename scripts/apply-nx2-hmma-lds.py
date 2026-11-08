@@ -131,26 +131,30 @@ t = rep(t, '''        const Id lane = ctx.OpLoad(u32ty, ctx.subgroup_local_invoc
         };
 ''', "tensor")
 
-t = rep(t, '''            bs[col] = unpack(ctx.OpGroupNonUniformShuffle(u32ty, imm(3), b,
-                                                          add(b_lane, imm(col * 4))));''',
-    '''            bs[col] = unpack(fetch(b, add(b_lane, imm(col * 4)),
-                                   ctx.OpSelect(u32ty, upper, imm(5), imm(4))));''', "tensor")
-t = rep(t, '''            const Id as = unpack(ctx.OpGroupNonUniformShuffle(u32ty, imm(3), a, a_lane));''',
-    '''            const Id as = unpack(fetch(a, a_lane,
-                                       ctx.OpSelect(u32ty, upper, imm(row + 2), imm(row))));''', "tensor")
-t = rep(t, '''        ctx.AddLabel(end);
-        std::array<Id, 2> packed;''', '''        ctx.AddLabel(end);
-        if (lds_mode == 2) {
+# Lichii #174 unrolls each K=8 group (emit_group with a `pick` of the low or high words).
+t = rep(t, '''                    bs[col] = unpack(ctx.OpGroupNonUniformShuffle(
+                        u32ty, imm(3), b, add(b_base, imm(component + col * 4))));''',
+    '''                    bs[col] = unpack(fetch(b, add(b_base, imm(component + col * 4)),
+                                           pick(imm(4), imm(5))));''', "tensor")
+t = rep(t, '''                    const Id as = unpack(ctx.OpGroupNonUniformShuffle(
+                        u32ty, imm(3), pick(inputs[row], inputs[row + 2]),
+                        add(a_base, imm(component))));''',
+    '''                    const Id as = unpack(fetch(pick(inputs[row], inputs[row + 2]),
+                                               add(a_base, imm(component)),
+                                               pick(imm(row), imm(row + 2))));''', "tensor")
+t = rep(t, '''        std::array<Id, 2> packed;
+        for (u32 row = 0; row < 2; ++row)''', '''        if (lds_mode == 2) {
             lds_barrier();
         }
-        std::array<Id, 2> packed;''', "tensor")
+        std::array<Id, 2> packed;
+        for (u32 row = 0; row < 2; ++row)''', "tensor")
 # Qualcomm's driver is marked as having broken subgroup shuffles, so every software HMMA
 # program was rejected there (Ocarina: 10 compute programs, black 3D view). The workgroup-memory
 # modes use no shuffle: only refuse when the program falls back to shuffles (mode 0).
-t = rep(t, """        if (!ctx.profile.SupportsSubgroupStage(program.stage) ||
+t = rep(t, """        if (!ctx.SupportsSubgroups() ||
             ctx.profile.has_broken_spirv_subgroup_shuffle)
             throw NotImplementedException("Software HMMA requires subgroup shuffle support");""",
-        """        if (ctx.nx2_lds_mode == 0 && (!ctx.profile.SupportsSubgroupStage(program.stage) ||
+        """        if (ctx.nx2_lds_mode == 0 && (!ctx.SupportsSubgroups() ||
                                       ctx.profile.has_broken_spirv_subgroup_shuffle))
             throw NotImplementedException("Software HMMA requires subgroup shuffle support");""",
         "HMMA shuffle requirement")
@@ -197,4 +201,4 @@ wt = rep(wt, """Id ShuffleAbsolute(EmitContext& ctx, Id value, Id src_thread_id)
     }
 """, "emit_spirv_warp.cpp")
 w.write_text(wt)
-print("HMMA and upscaler shuffles through workgroup memory (hmma_lds v3)")
+print("HMMA and upscaler shuffles through workgroup memory (hmma_lds v4, Lichii #174 shape)")

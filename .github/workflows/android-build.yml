@@ -91,23 +91,19 @@ jobs:
           # Lichii is zortos293's continuation of Eglantine nx2 (9a435b5 is an ancestor).
           git clone --recursive --branch nx2 --single-branch \
             https://github.com/zortos293/Lichii.git upstream
-          git -C upstream checkout bf4c42e22
+          git -C upstream checkout 3153d96b9
           # godpow's ARM64 macro JIT (Djihads80/Eglantine PR #503, from an Odin 3), with the
           # split front using it; EDEN_NX2_MME_JIT=0 goes back to the interpreter.
           git -C upstream -c user.name=ci -c user.email=ci@localhost \
             am --3way "$GITHUB_WORKSPACE/patches/arm64-macro-jit.patch"
-          # godpow's memory, texture and stability fixes from the same PR: large texture arrays
-          # backed on phones (Mario Kart World's black roads), lower mips kept for images the host
-          # cannot create, memory budget without VK_EXT_memory_budget, freed guest memory
-          # returned, staging buffer fixes, macro bind bounds.
-          git -C upstream -c user.name=ci -c user.email=ci@localhost \
-            am --3way "$GITHUB_WORKSPACE/patches/godpow-memory-textures.patch"
+          # godpow's memory/texture fixes (patches/godpow-memory-textures.patch) are left out for
+          # now: with them (131-136) Mario Kart World flashed blue and drew low-detail models.
           # Test: upstream's sorted-array RangeSet (#481). Since 131 each NCE fault on GPU-tracked
           # memory costs 4-5x more (DKB 500-1,170 ms/s in the handler, MKW ~700 ms/s).
           git -C upstream -c user.name=ci -c user.email=ci@localhost revert --no-edit 47a1f19d54
           git -C upstream submodule update --init --recursive
           echo "NX2_COMMIT=$(git -C upstream rev-parse HEAD)" >> "$GITHUB_ENV"
-          echo "NX2_UPSTREAM=zortos293/Lichii:nx2@bf4c42e+godpow" >> "$GITHUB_ENV"
+          echo "NX2_UPSTREAM=zortos293/Lichii:nx2@3153d96+jit" >> "$GITHUB_ENV"
           git -C upstream log -1 --oneline
 
       - name: Install host build tools

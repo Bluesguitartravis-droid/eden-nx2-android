@@ -102,6 +102,13 @@ jobs:
           # returned, staging buffer fixes, macro bind bounds.
           git -C upstream -c user.name=ci -c user.email=ci@localhost \
             am --3way "$GITHUB_WORKSPACE/patches/godpow-memory-textures.patch"
+          # Test: leave out "give freed guest memory back to the host" (two commits), suspected in
+          # 131's load crash (DKB on NCE) and Ocarina's early hang.
+          for subject in "give freed guest memory back to the host on" "Give freed guest memory back to the host"; do
+            c=$(git -C upstream log --format=%H -n1 -F --grep="$subject")
+            test -n "$c"
+            git -C upstream -c user.name=ci -c user.email=ci@localhost revert --no-edit "$c"
+          done
           git -C upstream submodule update --init --recursive
           echo "NX2_COMMIT=$(git -C upstream rev-parse HEAD)" >> "$GITHUB_ENV"
           echo "NX2_UPSTREAM=zortos293/Lichii:nx2@bf4c42e+godpow" >> "$GITHUB_ENV"

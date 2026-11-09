@@ -91,7 +91,7 @@ jobs:
           # Lichii is zortos293's continuation of Eglantine nx2 (9a435b5 is an ancestor).
           git clone --recursive --branch nx2 --single-branch \
             https://github.com/zortos293/Lichii.git upstream
-          git -C upstream checkout 3153d96b9
+          git -C upstream checkout cb5c5c7c6
           # godpow's ARM64 macro JIT (Djihads80/Eglantine PR #503, from an Odin 3), with the
           # split front using it; EDEN_NX2_MME_JIT=0 goes back to the interpreter.
           git -C upstream -c user.name=ci -c user.email=ci@localhost \
@@ -100,7 +100,7 @@ jobs:
           # now: with them (131-136) Mario Kart World flashed blue and drew low-detail models.
           git -C upstream submodule update --init --recursive
           echo "NX2_COMMIT=$(git -C upstream rev-parse HEAD)" >> "$GITHUB_ENV"
-          echo "NX2_UPSTREAM=zortos293/Lichii:nx2@3153d96+jit" >> "$GITHUB_ENV"
+          echo "NX2_UPSTREAM=zortos293/Lichii:nx2@cb5c5c7+jit" >> "$GITHUB_ENV"
           git -C upstream log -1 --oneline
 
       - name: Install host build tools
@@ -139,6 +139,10 @@ jobs:
       - name: Keep cached library ExeFS games at startup
         shell: bash
         run: python3 scripts/apply-nx2-cached-exefs-games.py upstream
+
+      - name: Launch library ExeFS games from the list
+        shell: bash
+        run: python3 scripts/apply-nx2-exefs-list-launch.py upstream
 
       - name: Enable direct ExeFS Android folder launch
         shell: bash
@@ -241,6 +245,14 @@ jobs:
         if: github.ref_name != 'main'
         shell: bash
         run: python3 scripts/apply-nx2-invalidation-stats.py upstream
+
+      - name: NCE collects small writes to GPU-written pages
+        shell: bash
+        run: python3 scripts/apply-nx2-nce-collect-writes.py upstream
+
+      - name: Frame statistics, stop reasons, session summary, ADPF for Switch 2 presents
+        shell: bash
+        run: python3 scripts/apply-nx2-diagnostics.py upstream
 
       - name: Zero-size staging buffer guard
         shell: bash

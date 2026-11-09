@@ -8,7 +8,8 @@ whole GPU (Scheduler::Finish): Donkey Kong Bananza on NCE does that ~1,700 times
 
 Allocate the cache's (non-sparse) buffers as Stream on Qualcomm/Turnip too.
 EDEN_NX2_MAPPED_BUFFERS=0 turns it off. The mapped-read path is counted and logged as
-"NX2 mapped download" next to the scheduler stats."""
+"NX2 mapped download" next to the scheduler stats; what a mapped read waits for is
+apply-nx2-download-write-tick.py's."""
 from pathlib import Path
 import sys
 
@@ -47,20 +48,6 @@ t = p.read_text()
 if "#include <cstdlib>" not in t:
     p.write_text("#include <cstdlib>\n" + t)
 
-# Newer Lichii (Frizti port, #194) makes the mapped read a host-read barrier plus a full
-# Finish, for MoltenVK. With every submission ending in that barrier (below), waiting for the
-# buffer's tick is enough: put the old wait back so the read waits only as far as needed.
-bc = root / "buffer_cache/buffer_cache.h"
-bt = bc.read_text()
-new_shape = """        if (const auto mapped = buffer.Mapped(); !mapped.empty()) {
-            runtime.FinishForHostRead();
-            for (const BufferCopy& copy : copies) {"""
-if new_shape in bt:
-    bt = bt.replace(new_shape, """        if (const auto mapped = buffer.Mapped(); !mapped.empty()) {
-            runtime.Wait(buffer.LastUsageTick());
-            for (const BufferCopy& copy : copies) {""", 1)
-    bc.write_text(bt)
-
 # Every submission ends with a host-read barrier, so a fence wait makes its writes visible
 # to the CPU through the mapping.
 sc = root / "renderer_vulkan/vk_scheduler.cpp"
@@ -95,20 +82,6 @@ t = p.read_text()
 if "#include <atomic>" not in t:
     t = t.replace("#pragma once\n", "#pragma once\n\n#include <atomic>\n", 1)
     p.write_text(t)
-
-patch("buffer_cache/buffer_cache.h",
-      """        if (const auto mapped = buffer.Mapped(); !mapped.empty()) {
-            runtime.Wait(buffer.LastUsageTick());""",
-      """        if (const auto mapped = buffer.Mapped(); !mapped.empty()) {
-            const bool nx2_profile = VideoCommon::Nx2Profile::Enabled();
-            const u64 nx2_start = nx2_profile ? VideoCommon::Nx2Profile::Now() : 0;
-            runtime.Wait(buffer.LastUsageTick());
-            if (nx2_profile) {
-                VideoCommon::Nx2Profile::g_nx2_mapped_downloads.fetch_add(1, std::memory_order_relaxed);
-                VideoCommon::Nx2Profile::g_nx2_mapped_download_ns.fetch_add(
-                    VideoCommon::Nx2Profile::Now() - nx2_start, std::memory_order_relaxed);
-            }""",
-      "g_nx2_mapped_downloads.fetch_add")
 
 patch("renderer_vulkan/vk_scheduler.cpp",
       """    std::vector<std::tuple<u64, u64, std::string>> nx2_finishes;""",

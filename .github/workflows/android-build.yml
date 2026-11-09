@@ -101,6 +101,10 @@ jobs:
           # Test: upstream's sorted-array RangeSet (#481). Since 131 each NCE fault on GPU-tracked
           # memory costs 4-5x more (DKB 500-1,170 ms/s in the handler, MKW ~700 ms/s).
           git -C upstream -c user.name=ci -c user.email=ci@localhost revert --no-edit 47a1f19d54
+          # Test: upstream's finer CPU-write tracking, suspected in the 4-5x costlier NCE faults.
+          for c in 821ccd570 6bb54dd86 d181de503; do
+            git -C upstream -c user.name=ci -c user.email=ci@localhost revert --no-edit "$c"
+          done
           git -C upstream submodule update --init --recursive
           echo "NX2_COMMIT=$(git -C upstream rev-parse HEAD)" >> "$GITHUB_ENV"
           echo "NX2_UPSTREAM=zortos293/Lichii:nx2@3153d96+jit" >> "$GITHUB_ENV"

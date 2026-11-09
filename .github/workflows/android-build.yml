@@ -240,6 +240,15 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-coopmat-probe.py upstream
 
+      - name: GPU-written invalidation stats (test builds)
+        if: github.ref_name != 'main'
+        shell: bash
+        run: python3 scripts/apply-nx2-invalidation-stats.py upstream
+
+      - name: Silent Switch 2 microphone on Android
+        shell: bash
+        run: python3 scripts/apply-nx2-silent-mic.py upstream
+
       - name: Cooperative matrix query guard
         shell: bash
         run: python3 scripts/apply-nx2-coopmat-guard.py upstream

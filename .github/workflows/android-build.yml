@@ -249,6 +249,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-invalidation-stats.py upstream
 
+      - name: Zero-size staging buffer guard
+        shell: bash
+        run: python3 scripts/apply-nx2-staging-zero-size.py upstream
+
       - name: Silent Switch 2 microphone on Android
         shell: bash
         run: python3 scripts/apply-nx2-silent-mic.py upstream

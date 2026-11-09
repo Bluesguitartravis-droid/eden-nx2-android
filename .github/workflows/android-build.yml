@@ -246,6 +246,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-staging-zero-size.py upstream
 
+      - name: Invalid-format image upload guard
+        shell: bash
+        run: python3 scripts/apply-nx2-invalid-format-upload.py upstream
+
       - name: Silent Switch 2 microphone on Android
         shell: bash
         run: python3 scripts/apply-nx2-silent-mic.py upstream

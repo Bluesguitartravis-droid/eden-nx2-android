@@ -19,6 +19,9 @@ namespace Common::Nx2NceStats {
 inline std::atomic<std::uint64_t> faults{};
 inline std::atomic<std::uint64_t> fault_ns{};
 inline std::atomic<std::uint64_t> unmapped{};
+// GPU-cached pages a fault hit that the GPU had written: the fault waits for the GPU thread.
+inline std::atomic<std::uint64_t> sync_invalidations{};
+inline std::atomic<std::uint64_t> sync_invalidation_ns{};
 } // namespace Common::Nx2NceStats
 ''')
 
@@ -111,9 +114,13 @@ report = r'''                            {
                                     const u64 faults = Common::Nx2NceStats::faults.exchange(0);
                                     const u64 fault_ns = Common::Nx2NceStats::fault_ns.exchange(0);
                                     const u64 unmapped = Common::Nx2NceStats::unmapped.exchange(0);
-                                    LOG_INFO(Core, "NX2_NCE faults {:.0f}/s handler {:.1f} ms/s unmapped {:.0f}/s",
+                                    const u64 sync_inv = Common::Nx2NceStats::sync_invalidations.exchange(0);
+                                    const u64 sync_ns = Common::Nx2NceStats::sync_invalidation_ns.exchange(0);
+                                    LOG_INFO(Core, "NX2_NCE faults {:.0f}/s handler {:.1f} ms/s unmapped {:.0f}/s "
+                                                   "gpu-written waits {:.0f}/s {:.1f} ms/s",
                                              faults / window_s, fault_ns / 1e6 / window_s,
-                                             unmapped / window_s);
+                                             unmapped / window_s, sync_inv / window_s,
+                                             sync_ns / 1e6 / window_s);
                                 }
                             }
 '''

@@ -295,6 +295,14 @@ jobs:
           ./gradlew tasks --all > "$GITHUB_WORKSPACE/gradle-tasks.txt"
           grep -E "assemble.*(Standard|Release|Debug)" "$GITHUB_WORKSPACE/gradle-tasks.txt" | head -n 80 || true
 
+      - name: Cache downloaded dependencies
+        uses: actions/cache@v4
+        with:
+          # GitHub release downloads (Boost, OpenSSL...) sometimes fail for hours (504).
+          path: upstream/.cache/cpm
+          key: cpm-${{ hashFiles('upstream/cpmfile.json', 'upstream/**/cpmfile.json') }}
+          restore-keys: cpm-
+
       - name: Kotlin compile preflight
         shell: bash
         working-directory: upstream/src/android

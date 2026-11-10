@@ -213,6 +213,12 @@ jobs:
         # 12 fps on Dynarmic, build 145) against ~2.2 % on builds 118-127 with this.
         run: python3 scripts/apply-nx2-hmma-unroll.py upstream
 
+      - name: Terrain layer arrays get memory on Android (Mario Kart World black ground)
+        shell: bash
+        # MKW's three 8192x8192x68 terrain arrays: the two ASTC ones stayed wholly unbacked on
+        # Adreno (only GPU-decoded ASTC got memory by layer), the third was capped at 384 MiB.
+        run: python3 scripts/apply-nx2-android-terrain-layers.py upstream
+
       - name: Slow Ocarina compute shaders unoptimized on Adreno; log compute builds
         shell: bash
         run: python3 scripts/apply-nx2-slow-compile.py upstream

@@ -21,7 +21,8 @@ memcpy) is cheaper the old way, so the handler then falls back to it and remembe
 bulk-written for two seconds. Stores the interpreter does not know (atomics, DC ZVA, ST1) also
 fall back.
 
-EDEN_NX2_NCE_COLLECT_WRITES=0 turns it off. The NX2_NCE line gains "collected N/s, bursts,
+Off by default since build 146 (DKB was slower with it: its writes are mostly bursts);
+EDEN_NX2_NCE_COLLECT_WRITES=1 turns it on. The NX2_NCE line gains "collected N/s, bursts,
 not emulated"."""
 from pathlib import Path
 import sys
@@ -186,8 +187,10 @@ u64 Nx2NowNs() {
 
 bool Memory::Nx2CollectNceWrite(Common::ProcessAddress vaddr) {
     static const bool enabled = [] {
+        // Off unless asked for: build 145 measured Donkey Kong Bananza slower with it (its writes
+        // to these pages are mostly bursts: 33,000 emulated stores/s and still 1,400 waits/s).
         const char* value = std::getenv("EDEN_NX2_NCE_COLLECT_WRITES");
-        return value == nullptr || value[0] != '0';
+        return value != nullptr && value[0] == '1';
     }();
     const size_t core = system.GetCurrentHostThreadID();
     if (!enabled || core >= Core::Hardware::NUM_CPU_CORES) {

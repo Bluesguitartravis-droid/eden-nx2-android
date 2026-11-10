@@ -6,10 +6,13 @@ large to back whole, so upstream gives such arrays memory layer by layer as the 
 1. Only ASTC that is decoded on the GPU qualifies. Adreno samples ASTC natively, so the two ASTC
    arrays fall through to a wholly unbacked image and read as zero: black roads and ground.
    Native ASTC uploads layer by layer like any plain format, so let it qualify.
-2. A layered image gets at most 384 MiB (devices reporting under 7 GiB of GPU memory), four layers
-   of the third array, and the texture cache budget of an integrated GPU is 4 GiB whatever the
-   RAM. With 14 GiB or more of RAM: 1 GiB an image and a 6 GiB budget; with 20 GiB or more:
-   2 GiB an image and an 8 GiB budget.
+2. The game writes into all 68 layers of each array, so whole layers at full size come to 4.9 GiB
+   (build 148 bound them and Android killed the app while loading). Like upstream does for
+   GPU-decoded ASTC arrays (TrimmedHostInfo), such an array keeps only its smaller mip levels on
+   the host: at most 512 MiB an array (256 MiB with under 14 GiB of RAM), which is 4096x4096 for
+   the ASTC arrays and 2048x2048 for the third. Layers upload in batches of at most 96 MiB.
+3. A layered image got at most 384 MiB and an integrated GPU's texture budget is 4 GiB whatever
+   the RAM: 1 GiB an image and a 6 GiB budget with 14 GiB or more of RAM.
 
 EDEN_NX2_TERRAIN_MEMORY=0 restores upstream's behaviour."""
 from pathlib import Path
@@ -74,7 +77,7 @@ patch(tc,
 """,
       """[[nodiscard]] VkDeviceSize SparseLayersCap(const Device& device) {
     if (const u64 ram = Nx2TerrainRamGiB(); ram >= 14) {
-        return VkDeviceSize{ram >= 20 ? 2048U : 1024U} << 20;
+        return VkDeviceSize{1024} << 20;
     }
 """,
       "const u64 ram = Nx2TerrainRamGiB(); ram >= 14")
@@ -94,7 +97,150 @@ patch(tc,
     }
     std::vector<VkSparseImageMemoryBind> image_binds;""",
       "NX2 sparse layered image")
+# Trimmed host shape for block-compressed SparseLayers arrays the host samples as they are.
+patch(tc,
+      """[[nodiscard]] bool IsCubeCompatible(const Device& device, const ImageInfo& info) {""",
+      """/// NX2 Android: TrimmedHostInfo, and for a block-compressed layered array over 1 GiB that the
+/// host samples as it is (SparseLayers), only the mip levels that fit the per-array limit.
+[[nodiscard]] ImageInfo Nx2TrimmedHostInfo(const Device& device, const ImageInfo& info,
+                                           u32& level_offset, GPUVAddr gpu_addr) {
+    ImageInfo host = TrimmedHostInfo(device, info, level_offset);
+    const u64 ram = Nx2TerrainRamGiB();
+    if (level_offset != 0 || ram == 0 || IsHugeAstcArray(device, info) ||
+        !(IsPixelFormatASTC(info.format) || IsPixelFormatBCn(info.format)) ||
+        !UsesSparseLayers(device, info, gpu_addr)) {
+        return host;
+    }
+    const u32 block_width = VideoCore::Surface::DefaultBlockWidth(info.format);
+    const u32 block_height = VideoCore::Surface::DefaultBlockHeight(info.format);
+    const u64 block_bytes = VideoCore::Surface::BytesPerBlock(info.format);
+    const u32 levels = HostMipCount(info);
+    const auto bytes_from = [&](u32 skip) {
+        u64 bytes = 0;
+        for (u32 level = skip; level < levels; ++level) {
+            const u32 width = (std::max)(info.size.width >> level, 1U);
+            const u32 height = (std::max)(info.size.height >> level, 1U);
+            bytes += u64{Common::DivCeil(width, block_width)} *
+                     Common::DivCeil(height, block_height) * block_bytes;
+        }
+        return bytes * static_cast<u64>(info.resources.layers);
+    };
+    const u64 whole = bytes_from(0);
+    if (whole <= (u64{1} << 30)) {
+        return host;
+    }
+    const u64 limit = (ram >= 14 ? u64{512} : u64{256}) << 20;
+    while (level_offset + 1 < levels && bytes_from(level_offset) > limit) {
+        ++level_offset;
+    }
+    host.size.width = (std::max)(info.size.width >> level_offset, 1U);
+    host.size.height = (std::max)(info.size.height >> level_offset, 1U);
+    host.resources.levels -= static_cast<s32>(level_offset);
+    static std::atomic<u32> logged{};
+    if (logged.fetch_add(1) < 24) {
+        LOG_INFO(Render_Vulkan,
+                 "NX2 layered array {:#x}: {}x{}x{} is {} MiB; keeping mip levels {}+ ({}x{}, {} MiB)",
+                 gpu_addr, info.size.width, info.size.height, info.resources.layers, whole >> 20,
+                 level_offset, host.size.width, host.size.height, bytes_from(level_offset) >> 20);
+    }
+    return host;
+}
+
+[[nodiscard]] bool IsCubeCompatible(const Device& device, const ImageInfo& info) {""",
+      "Nx2TrimmedHostInfo(const Device& device")
+
+p = root / tc
+t = p.read_text()
+for old, new in (
+        ("TrimmedHostInfo(runtime_.device, info, host_level_offset)",
+         "Nx2TrimmedHostInfo(runtime_.device, info, host_level_offset, gpu_addr_)"),
+        ("const ImageInfo host = TrimmedHostInfo(device, info, offset);",
+         "const ImageInfo host = Nx2TrimmedHostInfo(device, info, offset, gpu_addr);")):
+    if new not in t:
+        if old not in t:
+            raise SystemExit(f"{tc}: anchor not found: {old}")
+        t = t.replace(" " + old, " " + new).replace("(" + old, "(" + new)
+        if new not in t:
+            raise SystemExit(f"{tc}: call not replaced: {old}")
+p.write_text(t)
+
+# Plain layer uploads of a trimmed array: only the kept levels, a batch of layers at a time.
+patch("texture_cache/texture_cache.h",
+      """        if (False(image.flags & ImageFlagBits::AcceleratedUpload)) {
+            // Plain formats: each layer unswizzled on its own into its layer of the image.
+""",
+      """        if (False(image.flags & ImageFlagBits::AcceleratedUpload) && image.host_level_offset != 0) {
+            // NX2: a trimmed plain array. Each layer is unswizzled whole into a scratch buffer;
+            // only the tail holding the kept levels goes to the staging buffer.
+            ImageInfo layer_info = image.info;
+            layer_info.resources.layers = 1;
+            const size_t layer_size = CalculateUnswizzledSizeBytes(layer_info);
+            const s32 skip = static_cast<s32>(image.host_level_offset);
+            unswizzle_data_buffer.resize_destructive(layer_size);
+            const std::span<u8> scratch{unswizzle_data_buffer.data(), layer_size};
+            size_t tail_offset = 0;
+            size_t done = 0;
+            while (done < layers.size()) {
+                boost::container::small_vector<BufferImageCopy, 16> first_copies;
+                const auto unswizzle = [&](u32 layer) {
+                    const GPUVAddr layer_addr = image.gpu_addr + u64{layer} * image.info.layer_stride;
+                    Tegra::Memory::GpuGuestMemory<u8, Tegra::Memory::GuestMemoryFlags::UnsafeRead>
+                        swizzle_data(*gpu_memory, layer_addr, image.info.layer_stride,
+                                     &swizzle_data_buffer);
+                    return UnswizzleImage(*gpu_memory, layer_addr, layer_info, swizzle_data, scratch);
+                };
+                if (done == 0) {
+                    first_copies = unswizzle(layers[0]);
+                    tail_offset = layer_size;
+                    size_t dropped_end = 0;
+                    for (const BufferImageCopy& copy : first_copies) {
+                        if (copy.image_subresource.base_level >= skip) {
+                            tail_offset = (std::min)(tail_offset, copy.buffer_offset);
+                        } else {
+                            dropped_end = (std::max)(dropped_end, copy.buffer_offset + 1);
+                        }
+                    }
+                    if (tail_offset >= layer_size || dropped_end > tail_offset) {
+                        LOG_ERROR(HW_GPU, "NX2 layered array {:#x}: unexpected level layout, not uploaded",
+                                  image.gpu_addr);
+                        return;
+                    }
+                }
+                const size_t tail = layer_size - tail_offset;
+                const size_t batch = (std::min)(layers.size() - done,
+                                                (std::max)(size_t{1}, (size_t{96} << 20) / tail));
+                auto staging = runtime.UploadStagingBuffer(tail * batch);
+                std::vector<BufferImageCopy> copies;
+                for (size_t i = 0; i < batch; ++i) {
+                    const u32 layer = layers[done + i];
+                    const auto layer_copies =
+                        done == 0 && i == 0 ? std::move(first_copies) : unswizzle(layer);
+                    std::memcpy(staging.mapped_span.data() + i * tail, scratch.data() + tail_offset,
+                                tail);
+                    for (BufferImageCopy copy : layer_copies) {
+                        if (copy.image_subresource.base_level < skip) {
+                            continue;
+                        }
+                        copy.buffer_offset = copy.buffer_offset - tail_offset + i * tail;
+                        copy.image_subresource.base_level -= skip;
+                        copy.image_subresource.base_layer = static_cast<s32>(layer);
+                        copies.push_back(copy);
+                    }
+                }
+                image.UploadMemory(staging, copies);
+                done += batch;
+            }
+            ++images_uploaded;
+            uploaded_bytes += u64{image.info.layer_stride} * layers.size();
+            ++layer_uploads;
+            return;
+        }
+        if (False(image.flags & ImageFlagBits::AcceleratedUpload)) {
+            // Plain formats: each layer unswizzled on its own into its layer of the image.
+""",
+      "NX2: a trimmed plain array")
 include(tc, ["<atomic>", "<cstdlib>", '"common/memory_detect.h"'])
+include("texture_cache/texture_cache.h", ["<cstring>"])
 
 dev = "vulkan_common/vulkan_device.cpp"
 patch(dev,
@@ -107,7 +253,7 @@ patch(dev,
         if (const char* value = std::getenv("EDEN_NX2_TERRAIN_MEMORY");
             value == nullptr || value[0] != '0') {
             const u64 ram = Common::GetMemInfo().TotalPhysicalMemory >> 30;
-            memory_size = (std::max)(memory_size, ram >= 20 ? 8_GiB : ram >= 14 ? 6_GiB : 4_GiB);
+            memory_size = (std::max)(memory_size, ram >= 14 ? 6_GiB : 4_GiB);
             LOG_INFO(Render_Vulkan, "NX2 texture memory budget {} GiB ({} GiB of RAM)",
                      memory_size >> 30, ram);
         }

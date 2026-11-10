@@ -217,6 +217,8 @@ jobs:
         shell: bash
         # MKW's three 8192x8192x68 terrain arrays: the two ASTC ones stayed wholly unbacked on
         # Adreno (only GPU-decoded ASTC got memory by layer), the third was capped at 384 MiB.
+        # Build 148 bound all 68 layers at full size (4.9 GiB) and Android killed the app while
+        # loading; since 149 each array keeps only the mip levels that fit 512 MiB.
         run: python3 scripts/apply-nx2-android-terrain-layers.py upstream
 
       - name: Slow Ocarina compute shaders unoptimized on Adreno; log compute builds

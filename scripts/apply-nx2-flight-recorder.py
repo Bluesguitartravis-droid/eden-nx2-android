@@ -56,9 +56,7 @@ patch(activity,
       "        org.yuzu.yuzu_emu.utils.Nx2FlightRecorder.pause()\n",
       "Nx2FlightRecorder.pause()")
 patch(activity,
-      "    override fun onDestroy() {\n"
       "        mainHandler.removeCallbacks(romSwapStopTimeoutRunnable)\n",
-      "    override fun onDestroy() {\n"
       "        mainHandler.removeCallbacks(romSwapStopTimeoutRunnable)\n"
       "        if (isFinishing && !isChangingConfigurations) {\n"
       "            org.yuzu.yuzu_emu.utils.Nx2FlightRecorder.stop(this)\n"

@@ -88,6 +88,8 @@ patch(fragment,
       "        updateGameTitle()\n\n"
       "        binding.inGameMenu.menu.findItem(R.id.menu_quick_settings)",
       "        updateGameTitle()\n"
+      "        binding.inGameMenu.menu.findItem(R.id.menu_nx2_flight_recovered)?.isVisible =\n"
+      "            org.yuzu.yuzu_emu.utils.Nx2FlightRecorder.hasRecoveredReport()\n"
       "        binding.inGameMenu.menu.findItem(R.id.menu_nx2_flight_capture)?.title =\n"
       "            getString(if (org.yuzu.yuzu_emu.utils.Nx2FlightRecorder.screenshotsEnabled(requireContext()))\n"
       "                R.string.nx2_flight_capture_on else R.string.nx2_flight_capture_off)\n\n"
@@ -97,6 +99,11 @@ patch(fragment,
       "            when (it.itemId) {\n"
       "                R.id.menu_pause_emulation -> {",
       "            when (it.itemId) {\n"
+      "                R.id.menu_nx2_flight_recovered -> {\n"
+      "                    binding.drawerLayout.closeDrawer(binding.inGameMenu)\n"
+      "                    org.yuzu.yuzu_emu.utils.Nx2FlightRecorder.shareReport(requireActivity(), true)\n"
+      "                    true\n"
+      "                }\n"
       "                R.id.menu_nx2_flight_report -> {\n"
       "                    binding.drawerLayout.closeDrawer(binding.inGameMenu)\n"
       "                    org.yuzu.yuzu_emu.utils.Nx2FlightRecorder.shareReport(requireActivity())\n"
@@ -116,6 +123,10 @@ patch("res/menu/menu_in_game.xml",
       "    <item\n"
       "        android:id=\"@+id/menu_exit\"",
       "    <item\n"
+      "        android:id=\"@+id/menu_nx2_flight_recovered\"\n"
+      "        android:icon=\"@drawable/ic_settings_outline\"\n"
+      "        android:title=\"@string/nx2_flight_recovered\" />\n\n"
+      "    <item\n"
       "        android:id=\"@+id/menu_nx2_flight_report\"\n"
       "        android:icon=\"@drawable/ic_settings_outline\"\n"
       "        android:title=\"@string/nx2_flight_report\" />\n\n"
@@ -128,6 +139,7 @@ patch("res/menu/menu_in_game.xml",
       "menu_nx2_flight_report")
 patch("res/values/strings.xml",
       "</resources>",
+      "    <string name=\"nx2_flight_recovered\">Share last interrupted report</string>\n"
       "    <string name=\"nx2_flight_report\">Save NX2 diagnostic report</string>\n"
       "    <string name=\"nx2_flight_capture_on\">Flight recorder screenshots: On</string>\n"
       "    <string name=\"nx2_flight_capture_off\">Flight recorder screenshots: Off</string>\n"

@@ -48,7 +48,7 @@ synchronization, Vulkan resource lifetime, or the native signal handler.
       android_exit_trace.txt   [when Android provides it]
       frames/frame-00.webp ... frame-11.webp
       logs/eden_log.txt         [tail, if present]
-      logs/eden_log.old.txt     [tail, if present]
+      logs/eden_log.txt.old.txt     [tail, if present]
       logs/nx2_crash.txt        [tail, if present]
 
 APK applicationId: dev.eden.eden_emulator. ZIPs are generated in the app's

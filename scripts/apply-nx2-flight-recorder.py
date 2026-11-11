@@ -4,13 +4,14 @@
 The recorder is app-side and does not hook emulator signal handlers or modify
 CPU/GPU scheduling. The overlay Kotlin file is copied into the upstream app.
 This patch fails closed when upstream UI anchors change.
-Usage: python3 scripts/apply-nx2-flight-recorder.py <upstream-root>
+Usage: python3 scripts/apply-nx2-flight-recorder.py <upstream-root> [build-tag]
 """
 from pathlib import Path
 import sys
 
-if len(sys.argv) != 2:
-    raise SystemExit("usage: apply-nx2-flight-recorder.py <upstream-root>")
+if len(sys.argv) not in (2, 3):
+    raise SystemExit("usage: apply-nx2-flight-recorder.py <upstream-root> [build-tag]")
+build_tag = sys.argv[2] if len(sys.argv) == 3 else "local"
 root = Path(sys.argv[1]).resolve()
 repo = Path(__file__).resolve().parent.parent
 app = root / "src/android/app/src/main"
@@ -19,7 +20,7 @@ src = repo / "android_overlay/src/main/java/org/yuzu/yuzu_emu/utils/Nx2FlightRec
 dst = kt / "utils/Nx2FlightRecorder.kt"
 if not src.is_file() or not dst.parent.is_dir():
     raise SystemExit("Flight recorder overlay or upstream Kotlin directory not found")
-dst.write_text(src.read_text())
+dst.write_text(src.read_text().replace("@NX2_BUILD@", build_tag))
 
 def patch(relative, old, new, check):
     path = app / relative
@@ -56,13 +57,14 @@ patch(activity,
       "        org.yuzu.yuzu_emu.utils.Nx2FlightRecorder.pause()\n",
       "Nx2FlightRecorder.pause()")
 patch(activity,
-      "        mainHandler.removeCallbacks(romSwapStopTimeoutRunnable)\n",
-      "        mainHandler.removeCallbacks(romSwapStopTimeoutRunnable)\n"
+      # Anchor on onDestroy: the same removeCallbacks line also opens scheduleRomSwapStopTimeout().
+      "        mainHandler.removeCallbacks(romSwapStopTimeoutRunnable)\n        super.onDestroy()\n",
       "        if (isFinishing && !isChangingConfigurations) {\n"
       "            org.yuzu.yuzu_emu.utils.Nx2FlightRecorder.stop(this)\n"
       "        } else {\n"
       "            org.yuzu.yuzu_emu.utils.Nx2FlightRecorder.pause()\n"
-      "        }\n",
+      "        }\n"
+      "        mainHandler.removeCallbacks(romSwapStopTimeoutRunnable)\n        super.onDestroy()\n",
       "Nx2FlightRecorder.stop(this)")
 
 # Offer recovered evidence at the normal launcher, including after a native SIGKILL.

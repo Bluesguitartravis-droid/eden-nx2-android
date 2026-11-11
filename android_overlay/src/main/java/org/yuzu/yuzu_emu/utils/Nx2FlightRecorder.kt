@@ -45,6 +45,8 @@ import java.util.zip.ZipOutputStream
  */
 object Nx2FlightRecorder {
     private const val TAG = "NX2_FLIGHT"
+    // Replaced by apply-nx2-flight-recorder.py with the CI build tag (build-N).
+    private const val NX2_BUILD = "@NX2_BUILD@"
     private const val FRAME_COUNT = 12
     private const val CAPTURE_INTERVAL_MS = 2500L
     private const val MAX_EVENTS_BYTES = 2L * 1024L * 1024L
@@ -175,6 +177,7 @@ object Nx2FlightRecorder {
                 .put("android_api", Build.VERSION.SDK_INT)
                 .put("device_manufacturer", Build.MANUFACTURER)
                 .put("device_model", Build.MODEL)
+                .put("nx2_build", NX2_BUILD)
                 .put("app_package", activity.packageName)
                 .put("app_version", try {
                     activity.packageManager.getPackageInfo(activity.packageName, 0).versionName
@@ -456,7 +459,8 @@ object Nx2FlightRecorder {
             }
             val logDir = context.getExternalFilesDir(null)?.let { File(it, "log") }
             if (logDir != null) {
-                for (name in listOf("eden_log.txt", "eden_log.old.txt",
+                // The previous run's log is eden_log.txt.old.txt on Android.
+                for (name in listOf("eden_log.txt", "eden_log.txt.old.txt",
                     "nx2_crash.txt")) {
                     val file = File(logDir, name)
                     if (file.isFile) {
@@ -466,6 +470,7 @@ object Nx2FlightRecorder {
             }
             val explanation = "NX2 Flight Recorder v1\n" +
                 "Session: " + dir.name + "\n" +
+                "Build: " + NX2_BUILD + "\n" +
                 "Screenshots are sampled at 480x270, every 2.5 seconds, 12 frames retained.\n" +
                 "Events are bounded to 2x2 MiB; native logs contain at most their last 4 MiB.\n" +
                 "Android termination metadata is added after relaunch when available.\n" +

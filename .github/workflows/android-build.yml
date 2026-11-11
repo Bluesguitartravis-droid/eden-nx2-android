@@ -12,7 +12,7 @@ on:
         type: boolean
         default: false
   push:
-    branches: [ main, fix/embedded-switch2-npdm, claude/lichii-test ]
+    branches: [ main, fix/embedded-switch2-npdm, claude/lichii-test, feature/nx2-flight-recorder ]
     paths:
       - ".github/workflows/android-build.yml"
       - "patches/**"

@@ -269,6 +269,13 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-diagnostics.py upstream
 
+      - name: NCE opens pages with GPU-written bytes for writing without waiting
+        shell: bash
+        # A write to such a page waited for the GPU thread (3,300-4,000/s in DKB). Now the page
+        # is copied and opened at once; the GPU thread finds the written bytes by comparison.
+        # In the log, "collected" counts pages opened and "bursts" pages opened again.
+        run: python3 scripts/apply-nx2-nce-open-pages.py upstream
+
       - name: Zero-size staging buffer guard
         shell: bash
         run: python3 scripts/apply-nx2-staging-zero-size.py upstream

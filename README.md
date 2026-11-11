@@ -33,3 +33,17 @@ Launch Switch 2 games as loose folders (or .nup), and fully close the app before
 
 The previous Eglantine base (builds 80-85) is documented in [docs/EGLANTINE_BASE.md](docs/EGLANTINE_BASE.md).
 The previous SX2A v0.3.2 baseline (build 69) is documented in [docs/SX2A_BASE.md](docs/SX2A_BASE.md).
+
+
+## Experimental NX2 Flight Recorder
+
+The experimental flight-recorder branch adds a local, crash-resilient diagnostic
+history: rolling 480x270 game frames, Android memory/thermal samples, previous
+process exit information, and a one-tap ZIP with the existing native NX2 logs.
+Use **Save NX2 diagnostic report** in the in-game drawer. Screenshots can be
+turned off there; no evidence is uploaded automatically. After an interrupted
+session, the next app launch can offer its recovered report.
+
+This is **not** continuous video or full execution replay, and does not yet
+change the existing native signal handler. See [Flight Recorder design and
+test instructions](docs/NX2_FLIGHT_RECORDER.md).

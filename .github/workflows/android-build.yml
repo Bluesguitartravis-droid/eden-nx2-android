@@ -12,7 +12,7 @@ on:
         type: boolean
         default: false
   push:
-    branches: [ main, fix/embedded-switch2-npdm, claude/lichii-test ]
+    branches: [ main, fix/embedded-switch2-npdm, claude/lichii-test, feature/nx2-flight-recorder ]
     paths:
       - ".github/workflows/android-build.yml"
       - "patches/**"
@@ -268,6 +268,13 @@ jobs:
       - name: Frame statistics, stop reasons, session summary, ADPF for Switch 2 presents
         shell: bash
         run: python3 scripts/apply-nx2-diagnostics.py upstream
+
+      - name: Install NX2 Flight Recorder (rolling frames, event history, crash recovery)
+        shell: bash
+        run: |
+          python3 -m py_compile scripts/apply-nx2-flight-recorder.py
+          python3 scripts/apply-nx2-flight-recorder.py upstream
+          grep -q 'object Nx2FlightRecorder' upstream/src/android/app/src/main/java/org/yuzu/yuzu_emu/utils/Nx2FlightRecorder.kt
 
       - name: NCE opens pages with GPU-written bytes for writing without waiting
         shell: bash

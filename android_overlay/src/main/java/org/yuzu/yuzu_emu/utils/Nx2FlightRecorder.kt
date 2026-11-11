@@ -86,6 +86,15 @@ object Nx2FlightRecorder {
     }
 
     private fun recoverPreviousProcess(context: Context, base: File) {
+        val remembered = File(base, "last_interrupted_session.txt")
+        if (remembered.exists()) {
+            val prior = runCatching { remembered.readText().trim() }.getOrDefault("")
+            if (prior.matches(Regex("[0-9]+-[0-9a-f]{8}"))) {
+                File(base, prior).takeIf { it.isDirectory }?.let {
+                    previousUnexpectedSession = it
+                }
+            }
+        }
         val marker = File(base, "active_session.txt")
         if (!marker.exists()) return
         val name = runCatching { marker.readText().trim() }.getOrDefault("")
@@ -98,6 +107,7 @@ object Nx2FlightRecorder {
         marker.delete()
         if (!old.isDirectory) return
         previousUnexpectedSession = old
+        runCatching { File(base, "last_interrupted_session.txt").writeText(name) }
         val activeSince = old.lastModified()
         val exit = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             try {
@@ -227,6 +237,8 @@ object Nx2FlightRecorder {
         surfaceViewRef = null
         activityRef = null
     }
+
+    fun hasRecoveredReport(): Boolean = previousUnexpectedSession?.isDirectory == true
 
     fun screenshotsEnabled(context: Context): Boolean =
         context.getSharedPreferences("nx2_flight", Context.MODE_PRIVATE)

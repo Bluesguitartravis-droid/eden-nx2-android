@@ -1,0 +1,71 @@
+name: Build Switch 2 Native Probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ feature/native-switch2-poc ]
+    paths:
+      - ".github/workflows/native-switch2-poc.yml"
+      - "native_track/**"
+
+permissions:
+  contents: read
+
+jobs:
+  probe-arm64:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout research harness
+        uses: actions/checkout@v4
+
+      - name: Pin nx2android reference source
+        shell: bash
+        run: |
+          git clone --filter=blob:none https://github.com/shirai91/nx2android.git nx2android
+          git -C nx2android checkout 8e030b41caa05b109d497f486cea5f4abd1c7d73
+          echo "NX2ANDROID_COMMIT=$(git -C nx2android rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Install Android NDK r27c
+        shell: bash
+        run: |
+          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "ndk;27.2.12479018"
+
+      - name: Build native ARM64 probe
+        shell: bash
+        run: |
+          set -euxo pipefail
+          NDK="$ANDROID_SDK_ROOT/ndk/27.2.12479018"
+          CC="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang"
+          "$CC" -shared -fPIC -O2 -ffixed-x18 \
+            -Wl,-z,max-page-size=16384 \
+            native_track/switch2_probe.c \
+            -o libprobe.so \
+            -landroid -llog -lvulkan
+          file libprobe.so
+
+      - name: Package probe APK with nx2android NativeActivity packager
+        shell: bash
+        run: |
+          python3 nx2android/probes/app/mkapk.py \
+            libprobe.so \
+            NX2-Switch2-Native-Probe.apk \
+            probe-signing-key.json
+          sha256sum NX2-Switch2-Native-Probe.apk > SHA256SUMS.txt
+          {
+            echo "nx2android reference: $NX2ANDROID_COMMIT"
+            echo "target: Android arm64-v8a / API 29+"
+            echo "Switch 2 guest counter target: 31250000 Hz"
+            echo "No game content is included."
+          } > build-info.txt
+
+      - name: Upload native probe
+        uses: actions/upload-artifact@v4
+        with:
+          name: nx2-switch2-native-probe-${{ github.run_number }}
+          path: |
+            NX2-Switch2-Native-Probe.apk
+            SHA256SUMS.txt
+            build-info.txt
+          if-no-files-found: error
+          retention-days: 14

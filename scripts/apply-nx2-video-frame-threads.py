@@ -11,6 +11,7 @@ max_frame_delay 1: one frame at a time, its workers mostly idle. Build 157's tra
 For CPU decoders (not MediaCodec, not a GPU hwaccel) this clears LOW_DELAY and enables frame
 threading, so libdav1d (max_frame_delay auto) and FFmpeg's VP9 decode several frames at once.
 EDEN_NX2_VIDEO_FRAME_THREADS=0 restores the old setting.
+First built in build 161.
 Usage: python3 scripts/apply-nx2-video-frame-threads.py <upstream-root>
 """
 from pathlib import Path

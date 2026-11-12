@@ -5,6 +5,7 @@ The texture cache's existing EDEN_NX2_MEM_TRACE report (cache images, device usa
 staging pools, VMA heaps, process commit) now runs unless EDEN_NX2_MEM_TRACE=0, and the
 10 s watchdog adds NX2_PROC: /proc/self/status RSS split (anon / file / shmem = guest
 memory) and swap, plus the KGSL per-process GPU memory counters when readable.
+First built in build 157 (build 156 compiled but could not publish).
 Usage: python3 scripts/apply-nx2-mem-trace-on.py <upstream-root>
 """
 from pathlib import Path

@@ -101,3 +101,5 @@ keys, firmware, saved games or arbitrary raw guest-memory dumps in the export.
    markers and on-demand deeper tracing.
 4. Opt-in Perfetto capture, optional ADB-assisted export and per-build report
    comparison automation.
+
+<!-- Build 159: first build on Lichii faa4bd13a. -->

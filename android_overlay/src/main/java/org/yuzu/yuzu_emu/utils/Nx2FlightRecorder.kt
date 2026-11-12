@@ -305,6 +305,18 @@ object Nx2FlightRecorder {
             .put("threads", Thread.activeCount())
             .put("thermal_status", thermal)
         event("memory_sample", values.toString())
+        // Same line in eden_log.txt, so throttling lines up with NX2_FRAMES/NX2_CPU.
+        val headroom = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            runCatching {
+                context.getSystemService(PowerManager::class.java)?.getThermalHeadroom(10)
+            }.getOrNull() ?: Float.NaN
+        } else Float.NaN
+        runCatching {
+            org.yuzu.yuzu_emu.utils.Log.info("[NX2_THERMAL] status=" + thermal +
+                " headroom10s=" + String.format(java.util.Locale.US, "%.2f", headroom) +
+                " pss_mib=" + memory.totalPss / 1024 +
+                " avail_mib=" + system.availMem / 1048576)
+        }
     }
 
     private fun captureFrame() {

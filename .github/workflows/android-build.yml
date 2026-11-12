@@ -269,6 +269,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-diagnostics.py upstream
 
+      - name: Mesh emulation with per-primitive outputs (Mario Kart World dropped mesh draws)
+        shell: bash
+        run: python3 scripts/apply-nx2-mesh-per-primitive.py upstream
+
       - name: Log host CPU clocks every 10 s (thermal throttling check)
         shell: bash
         run: python3 scripts/apply-nx2-cpu-clocks.py upstream

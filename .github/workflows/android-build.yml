@@ -273,6 +273,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-cpu-clocks.py upstream
 
+      - name: Memory trace every 10 s and process memory split (Ocarina grew to 17 GB)
+        shell: bash
+        run: python3 scripts/apply-nx2-mem-trace-on.py upstream
+
       - name: Install NX2 Flight Recorder (rolling frames, event history, crash recovery)
         shell: bash
         run: |

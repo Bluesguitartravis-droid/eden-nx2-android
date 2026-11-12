@@ -91,7 +91,8 @@ jobs:
           # Lichii is zortos293's continuation of Eglantine nx2 (9a435b5 is an ancestor).
           git clone --recursive --branch nx2 --single-branch \
             https://github.com/zortos293/Lichii.git upstream
-          git -C upstream checkout cb5c5c7c6
+          # faa4bd13a: Lichii nx2 of 2026-11-12 (107 commits after cb5c5c7c6, the base of builds 147-158).
+          git -C upstream checkout faa4bd13a
           # godpow's ARM64 macro JIT (Djihads80/Eglantine PR #503, from an Odin 3), with the
           # split front using it; EDEN_NX2_MME_JIT=0 goes back to the interpreter.
           git -C upstream -c user.name=ci -c user.email=ci@localhost \
@@ -100,7 +101,7 @@ jobs:
           # now: with them (131-136) Mario Kart World flashed blue and drew low-detail models.
           git -C upstream submodule update --init --recursive
           echo "NX2_COMMIT=$(git -C upstream rev-parse HEAD)" >> "$GITHUB_ENV"
-          echo "NX2_UPSTREAM=zortos293/Lichii:nx2@cb5c5c7+jit" >> "$GITHUB_ENV"
+          echo "NX2_UPSTREAM=zortos293/Lichii:nx2@faa4bd1+jit" >> "$GITHUB_ENV"
           git -C upstream log -1 --oneline
 
       - name: Install host build tools

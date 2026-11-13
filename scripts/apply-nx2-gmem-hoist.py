@@ -14,8 +14,9 @@ once, by a function the entry point calls first, into private variables that eve
 reads. Constant buffers cannot change during a draw, and the pointer holders are storage buffers
 the program does not write.
 
-Build 165 computed them lazily (a private bool and a branch in every helper): Turnip's compiler
-crashed on it (Ocarina, in vkCreateComputePipelines). This version has no branch and no bool.
+Build 165 computed them lazily (a private bool and a branch in every helper) and build 166 in an
+entry-point function: Turnip's compiler crashed on both, at the same place, building Ocarina's
+compute programs. From build 167 only graphics stages are changed (where the measured cost is).
 EDEN_NX2_GMEM_HOIST=0 restores the old code.
 Usage: python3 scripts/apply-nx2-gmem-hoist.py <upstream-root>
 """
@@ -73,7 +74,11 @@ patch("spirv_emit_context.cpp", [
         "        const char* const value{std::getenv(\"EDEN_NX2_GMEM_HOIST\")};\n"
         "        return value == nullptr || value[0] != '0';\n"
         "    }()};\n"
-        "    const bool nx2_hoist{nx2_hoist_enabled && info.native_global_bounds &&\n"
+        "    // Graphics stages only: Turnip's compiler crashed on Ocarina's compute programs with the\n"
+        "    // bases hoisted (builds 165 and 166, same place in libvulkan_freedreno).\n"
+        "    const bool nx2_hoist{nx2_hoist_enabled && stage != Stage::Compute &&\n"
+        "                         stage != Stage::Task && stage != Stage::Mesh &&\n"
+        "                         info.native_global_bounds &&\n"
         "                         !info.storage_buffers_descriptors.empty() &&\n"
         "                         std::ranges::none_of(info.storage_buffers_descriptors,\n"
         "                                              [](const auto& desc) { return desc.is_written; })};\n"

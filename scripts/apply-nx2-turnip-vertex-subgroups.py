@@ -10,8 +10,9 @@ vertex shader whose warp votes, ballots or shuffles span 64-128 vertices reads o
 values: positions go wrong. Banana Native found the same on Turnip (geometry stage, Donkey Kong
 Bananza) and Lichii already leaves the geometry stage out on Turnip.
 
-On Turnip the vertex and tessellation stages are now left out as well, as on Qualcomm's driver.
-EDEN_NX2_TURNIP_VERTEX_SUBGROUPS=1 keeps them (the old behaviour).
+Build 163 left them out by default: the stripes stayed and Donkey Kong drew as a coarse model,
+so from build 165 this is opt-in: EDEN_NX2_TURNIP_VERTEX_SUBGROUPS=0 leaves the vertex and
+tessellation stages out, anything else keeps them (Lichii's behaviour).
 Usage: python3 scripts/apply-nx2-turnip-vertex-subgroups.py <upstream-root>
 """
 from pathlib import Path
@@ -32,14 +33,14 @@ new = old + r'''    if (driver_id == VK_DRIVER_ID_MESA_TURNIP) {
         // NX2 Turnip vertex subgroups: 64-128 lanes that a vertex stage cannot pin to the guest's
         // 32 put other vertices' values into warp votes and shuffles (Mario Kart World's stripes).
         const char* const keep{std::getenv("EDEN_NX2_TURNIP_VERTEX_SUBGROUPS")};
-        if (keep == nullptr || keep[0] != '1') {
+        if (keep != nullptr && keep[0] == '0') {
             for (const Shader::Stage stage : {Shader::Stage::VertexA, Shader::Stage::VertexB,
                                               Shader::Stage::TessellationControl,
                                               Shader::Stage::TessellationEval}) {
                 supported_subgroup_stages &= ~(1u << static_cast<u32>(stage));
             }
             LOG_INFO(Render_Vulkan, "NX2: Turnip: no subgroup operations in vertex and "
-                                    "tessellation shaders (EDEN_NX2_TURNIP_VERTEX_SUBGROUPS=1 keeps them)");
+                                    "tessellation shaders (EDEN_NX2_TURNIP_VERTEX_SUBGROUPS=0)");
         }
     }
 '''

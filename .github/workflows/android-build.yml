@@ -282,6 +282,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-relaunch-teardown.py upstream
 
+      - name: Turnip without subgroup operations in vertex shaders (Mario Kart World stripes)
+        shell: bash
+        run: python3 scripts/apply-nx2-turnip-vertex-subgroups.py upstream
+
       - name: Log host CPU clocks every 10 s (thermal throttling check)
         shell: bash
         run: python3 scripts/apply-nx2-cpu-clocks.py upstream

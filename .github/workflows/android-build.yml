@@ -286,6 +286,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-turnip-vertex-subgroups.py upstream
 
+      - name: Log shaders that load through pointers (NX2_GMEM, Ocarina GPU cost)
+        shell: bash
+        run: python3 scripts/apply-nx2-global-memory-log.py upstream
+
       - name: Log host CPU clocks every 10 s (thermal throttling check)
         shell: bash
         run: python3 scripts/apply-nx2-cpu-clocks.py upstream

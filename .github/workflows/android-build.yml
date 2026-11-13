@@ -278,6 +278,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-video-frame-threads.py upstream
 
+      - name: Keep the previous driver library through the next game's Load (relaunch crash)
+        shell: bash
+        run: python3 scripts/apply-nx2-relaunch-teardown.py upstream
+
       - name: Log host CPU clocks every 10 s (thermal throttling check)
         shell: bash
         run: python3 scripts/apply-nx2-cpu-clocks.py upstream

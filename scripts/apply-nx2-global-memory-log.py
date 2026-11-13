@@ -87,5 +87,38 @@ text = text.replace(anchor, anchor + r'''
 for inc in ("#include <mutex>\n", "#include <unordered_set>\n"):
     if inc not in text:
         text = text.replace("#include <algorithm>\n", "#include <algorithm>\n" + inc, 1)
+compute_anchor = ("    auto program{TranslateProgram(pools.inst, pools.block, env, cfg, host_info)};\n"
+                  "    const VkDriverIdKHR driver_id = device.GetDriverID();\n")
+if text.count(compute_anchor) != 1:
+    raise SystemExit("vk_pipeline_cache.cpp: compute TranslateProgram not found")
+text = text.replace(compute_anchor, compute_anchor + r'''    {
+        // NX2_COMPUTE: the shape of each compute program (build 164's trace: one Ocarina dispatch
+        // of 43x24 groups took 15 ms of a 60-90 ms frame).
+        u32 insts{}, gloads{}, shared_ops{}, images{}, warp{};
+        for (const auto* block : program.post_order_blocks) {
+            for (const auto& inst : block->Instructions()) {
+                ++insts;
+                const auto op{inst.GetOpcode()};
+                if (op >= Shader::IR::Opcode::LoadGlobalU8 && op <= Shader::IR::Opcode::LoadGlobal128) {
+                    ++gloads;
+                } else if (op >= Shader::IR::Opcode::LoadSharedU8 &&
+                           op <= Shader::IR::Opcode::WriteSharedU128) {
+                    ++shared_ops;
+                } else if (op >= Shader::IR::Opcode::ImageSampleImplicitLod &&
+                           op <= Shader::IR::Opcode::ImageAtomicExchange32) {
+                    ++images;
+                } else if (op >= Shader::IR::Opcode::VoteAll && op <= Shader::IR::Opcode::FSwizzleAdd) {
+                    ++warp;
+                }
+            }
+        }
+        LOG_INFO(Render_Vulkan,
+                 "NX2_COMPUTE s6:{:016x} wg={}x{}x{} shared={}B local={}B insts={} gloads={} "
+                 "shared_ops={} images={} warp={} blocks={}",
+                 key.unique_hash, program.workgroup_size[0], program.workgroup_size[1],
+                 program.workgroup_size[2], program.shared_memory_size, program.local_memory_size,
+                 insts, gloads, shared_ops, images, warp, program.post_order_blocks.size());
+    }
+''', 1)
 path.write_text(text)
-print("NX2_GMEM shader logging installed")
+print("NX2_GMEM / NX2_COMPUTE shader logging installed")

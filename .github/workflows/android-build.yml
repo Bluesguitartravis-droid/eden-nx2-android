@@ -290,6 +290,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-global-memory-log.py upstream
 
+      - name: Pointer loads read their candidate bases once per invocation (Ocarina GPU cost)
+        shell: bash
+        run: python3 scripts/apply-nx2-gmem-hoist.py upstream
+
       - name: Log host CPU clocks every 10 s (thermal throttling check)
         shell: bash
         run: python3 scripts/apply-nx2-cpu-clocks.py upstream

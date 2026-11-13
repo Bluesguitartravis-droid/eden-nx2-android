@@ -11,6 +11,7 @@ global memory gets one line (once per hash):
   NX2_GMEM s1:<hash> loads=<n> stores=<n> atomics=<n> candidates=<n> indirect=<n> native=<0|1>
 
 and EDEN_DKB_FRAME_TRACE=1 (an existing switch) names the slowest draws by the same hashes.
+First built in build 164.
 Usage: python3 scripts/apply-nx2-global-memory-log.py <upstream-root>
 """
 from pathlib import Path

@@ -308,6 +308,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-shader-progress.py upstream
 
+      - name: Dialog when the game itself aborts (svcBreak) instead of a silent black screen
+        shell: bash
+        run: python3 scripts/apply-nx2-guest-abort-notice.py upstream
+
       - name: Log host CPU clocks every 10 s (thermal throttling check)
         shell: bash
         run: python3 scripts/apply-nx2-cpu-clocks.py upstream

@@ -215,6 +215,7 @@ object Nx2FlightRecorder {
             override fun run() {
                 if (captureRunnable !== this) return
                 if (screenshotsEnabled(activity)) captureFrame()
+                checkGuestAbort()
                 mainHandler.postDelayed(this, CAPTURE_INTERVAL_MS)
             }
         }
@@ -390,6 +391,41 @@ object Nx2FlightRecorder {
             bitmap.recycle()
             captureInProgress.set(false)
         }
+    }
+
+    // The game's error code after it aborted (svcBreak), 0 while it runs. Native side:
+    // apply-nx2-guest-abort-notice.py.
+    @JvmStatic
+    private external fun nativeGuestAbort(): Int
+
+    private var guestAbortShown = 0
+
+    /** Shows once per abort that the game stopped, with its error code. */
+    private fun checkGuestAbort() {
+        val code = try {
+            nativeGuestAbort()
+        } catch (error: Throwable) {
+            0
+        }
+        if (code == 0) {
+            guestAbortShown = 0
+            return
+        }
+        if (code == guestAbortShown) return
+        guestAbortShown = code
+        val text = if (code == -1) "no error code" else String.format(
+            "error %04d-%04d", 2000 + (code and 0x1FF), (code ushr 9) and 0x1FFF)
+        event("guest_abort", text)
+        val activity = activityRef?.get() ?: return
+        if (activity.isFinishing || activity.isDestroyed) return
+        AlertDialog.Builder(activity)
+            .setTitle("The game crashed")
+            .setMessage("The game stopped itself ($text). The emulator is still open, but " +
+                "nothing more will happen on this screen.\n\nSave a report for diagnosis, " +
+                "then close the game from the menu and start it again.")
+            .setPositiveButton("Save report") { _, _ -> shareReport(activity) }
+            .setNegativeButton("OK", null)
+            .show()
     }
 
     fun shareReport(activity: Activity, recovered: Boolean = false) {

@@ -300,6 +300,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-pipeline-stats.py upstream
 
+      - name: Shader precache and build-all-cached switches (EDEN_NX2_PRECACHE, EDEN_NX2_BUILD_ALL_CACHED)
+        shell: bash
+        run: python3 scripts/apply-nx2-shader-precache.py upstream
+
       - name: Log host CPU clocks every 10 s (thermal throttling check)
         shell: bash
         run: python3 scripts/apply-nx2-cpu-clocks.py upstream

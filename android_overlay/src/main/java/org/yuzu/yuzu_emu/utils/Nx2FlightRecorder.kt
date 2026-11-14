@@ -45,6 +45,7 @@ import java.util.zip.ZipOutputStream
  */
 object Nx2FlightRecorder {
     private const val TAG = "NX2_FLIGHT"
+    private const val SESSION_LOG_BYTES = 2L * 1024L * 1024L
     // Replaced by apply-nx2-flight-recorder.py with the CI build tag (build-N).
     private const val NX2_BUILD = "@NX2_BUILD@"
     private const val FRAME_COUNT = 12
@@ -305,6 +306,10 @@ object Nx2FlightRecorder {
             .put("threads", Thread.activeCount())
             .put("thermal_status", thermal)
         event("memory_sample", values.toString())
+        // The native log is rotated each time the app starts, so a session that Android killed
+        // could lose its log before the report is saved (build 167: two relaunches). Keep the last
+        // 2 MiB of it with the session, refreshed every sample.
+        currentSession?.let { dir -> snapshotNativeLog(context, dir) }
         // Same line in eden_log.txt, so throttling lines up with NX2_FRAMES/NX2_CPU.
         val headroom = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             runCatching {
@@ -469,6 +474,10 @@ object Nx2FlightRecorder {
             }?.sortedBy { it.lastModified() }?.forEach { frame ->
                 addZipFile(zip, "frames/" + frame.name, frame, 1024L * 1024L)
             }
+            val sessionLog = File(dir, "session_log.txt")
+            if (sessionLog.isFile) {
+                addZipFile(zip, "logs/session_log.txt", sessionLog, MAX_NATIVE_LOG_BYTES)
+            }
             val logDir = context.getExternalFilesDir(null)?.let { File(it, "log") }
             if (logDir != null) {
                 // The previous run's log is eden_log.txt.old.txt on Android.
@@ -485,6 +494,7 @@ object Nx2FlightRecorder {
                 "Build: " + NX2_BUILD + "\n" +
                 "Screenshots are sampled at 480x270, every 2.5 seconds, 12 frames retained.\n" +
                 "Events are bounded to 2x2 MiB; native logs contain at most their last 4 MiB.\n" +
+                "logs/session_log.txt: the last 2 MiB of this session's own log, saved every 10 s.\n" +
                 "Android termination metadata is added after relaunch when available.\n" +
                 "These are diagnostic samples, not a deterministic guest/GPU replay.\n" +
                 "Review before sharing: logs may contain game titles and local file paths.\n"
@@ -493,6 +503,28 @@ object Nx2FlightRecorder {
             zip.closeEntry()
         }
         return archive
+    }
+
+    private fun snapshotNativeLog(context: Context, dir: File) {
+        runCatching {
+            val log = context.getExternalFilesDir(null)?.let { File(File(it, "log"), "eden_log.txt") }
+                ?: return
+            if (!log.isFile) return
+            val target = File(dir, "session_log.txt")
+            val temp = File(dir, "session_log.txt.tmp")
+            RandomAccessFile(log, "r").use { source ->
+                source.seek((source.length() - SESSION_LOG_BYTES).coerceAtLeast(0L))
+                FileOutputStream(temp).use { out ->
+                    val buffer = ByteArray(16384)
+                    while (true) {
+                        val n = source.read(buffer)
+                        if (n <= 0) break
+                        out.write(buffer, 0, n)
+                    }
+                }
+            }
+            temp.renameTo(target)
+        }
     }
 
     private fun addZipFile(zip: ZipOutputStream, name: String, file: File, max: Long) {

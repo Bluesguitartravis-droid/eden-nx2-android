@@ -6,6 +6,7 @@ Ocarina of Time (build 170) aborted 20 s after starting (nn::os::LockMutex -> Ab
 for 10 minutes with no sign of what happened. svcBreak (a guest panic, assert or abort) now
 records the game's error code; the app asks for it every 2.5 s (Nx2FlightRecorder) and shows a
 dialog with the code and a "Save report" button.
+First built in build 174.
 Usage: python3 scripts/apply-nx2-guest-abort-notice.py <upstream-root>
 """
 from pathlib import Path

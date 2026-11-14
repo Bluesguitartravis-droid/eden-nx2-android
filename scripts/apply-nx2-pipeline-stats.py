@@ -18,6 +18,7 @@ with VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR, and each one logs one line p
 Turnip reports registers, waves per core, spills/fills, NOPs and stall cycles; Qualcomm's driver
 reports what it reports. Off by default (statistics capture can slow pipeline builds). Pipelines
 loaded from the driver's cache may come without statistics: the line then says so.
+First built in build 170; compute-only =1 and the log head from build 172.
 Usage: python3 scripts/apply-nx2-pipeline-stats.py <upstream-root>
 """
 from pathlib import Path

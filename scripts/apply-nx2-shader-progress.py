@@ -14,6 +14,7 @@ Now the text names the step and counts it, with a time estimate once a step has 
 Native side: the precache builder's steps report as stages 10-13 and the renderer's precache
 (Warm) as stage 3, where it was folded into Build. The bar is indeterminate while a step has no
 total.
+First built in build 173.
 Usage: python3 scripts/apply-nx2-shader-progress.py <upstream-root>
 """
 from pathlib import Path

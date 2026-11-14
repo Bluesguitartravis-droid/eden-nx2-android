@@ -97,7 +97,7 @@ patch(mem,
         }
         // Held by the GPU thread while it applies the writes of the pages it closed.
         std::scoped_lock lock{nx2_open_mutex};
-        const u64 page = vaddr >> YUZU_PAGEBITS;
+        const u64 page = vaddr >> LICHII_PAGEBITS;
         const auto it = nx2_open_pages.find(page);
         if (it != nx2_open_pages.end() && it->second.ptr == ptr) {
             // Protected again meanwhile (another cache entry on the page).
@@ -109,13 +109,13 @@ patch(mem,
             }
             Nx2OpenPage& entry = nx2_open_pages[page];
             entry.ptr = ptr;
-            entry.before = std::make_unique<u8[]>(YUZU_PAGESIZE);
-            std::memcpy(entry.before.get(), ptr, YUZU_PAGESIZE);
+            entry.before = std::make_unique<u8[]>(LICHII_PAGESIZE);
+            std::memcpy(entry.before.get(), ptr, LICHII_PAGESIZE);
             nx2_open_count.store(nx2_open_pages.size(), std::memory_order_relaxed);
             Common::Nx2NceWrites::collected.fetch_add(1, std::memory_order_relaxed);
         }
         std::scoped_lock protect_lock{nx2_protect_mutex};
-        host_buffer->Protect(page << YUZU_PAGEBITS, YUZU_PAGESIZE,
+        host_buffer->Protect(page << LICHII_PAGEBITS, LICHII_PAGESIZE,
                              Common::MemoryPermission::Read | Common::MemoryPermission::Write);
         return true;
     }
@@ -138,15 +138,15 @@ patch(mem,
                 std::scoped_lock protect_lock{nx2_protect_mutex};
                 if (std::as_const(current_page_table->entries)[page].Type() ==
                     Common::PageType::RasterizerCachedMemory) {
-                    host_buffer->Protect(page << YUZU_PAGEBITS, YUZU_PAGESIZE,
+                    host_buffer->Protect(page << LICHII_PAGEBITS, LICHII_PAGESIZE,
                                          Common::MemoryPermission::Read);
                 }
             }
             const u8* const now = entry.ptr;
             const u8* const before = entry.before.get();
             size_t run_begin = none;
-            for (size_t offset = 0; offset <= YUZU_PAGESIZE; offset += 4) {
-                if (offset < YUZU_PAGESIZE && std::memcmp(now + offset, before + offset, 4) != 0) {
+            for (size_t offset = 0; offset <= LICHII_PAGESIZE; offset += 4) {
+                if (offset < LICHII_PAGESIZE && std::memcmp(now + offset, before + offset, 4) != 0) {
                     if (run_begin == none) {
                         run_begin = offset;
                     }
@@ -191,7 +191,7 @@ patch(mem,
       """    if (rasterizer) {
         // NX2: only the application's memory is gathered (System::Nx2GatherNceOpenPages).
         const Kernel::KProcess* const nx2_application = system.ApplicationProcess();
-        if (size == YUZU_PAGESIZE && (GetInteger(vaddr) & YUZU_PAGEMASK) == 0 &&
+        if (size == LICHII_PAGESIZE && (GetInteger(vaddr) & LICHII_PAGEMASK) == 0 &&
             nx2_application != nullptr &&
             &const_cast<Kernel::KProcess*>(nx2_application)->GetMemory() == this &&
             impl->Nx2OpenPageForWrite(GetInteger(vaddr), ptr)) {

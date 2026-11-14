@@ -12,17 +12,18 @@ import sys
 root = Path(sys.argv[1]).resolve()
 f = root / "src/video_core/engines/kepler_compute.cpp"
 t = f.read_text()
-old = """    return dlss_chain.failure != VideoCore::GameDlssReason::None &&
-           native_key != passes->prepass &&
+old = """    return DlssNetworkDroppedForGood() && !passes->IsPrepass(native_key) &&
            dlss_chain.programs.contains(native_key);
 }"""
+# Lichii (2026-11-13) skips the middle passes itself once the network is dropped for good; the
+# replacement chosen by the setting (a blocker) still ran them.
 new = """    static const bool nx2_run_network = [] {
         const char* v = std::getenv("EDEN_NX2_DLSS_RUN_NETWORK");
         return v && v[0] == '1';
     }();
-    const bool nx2_skip = nx2_run_network ? dlss_chain.failure != VideoCore::GameDlssReason::None
-                                          : replacement;
-    const bool nx2_skipped = nx2_skip && native_key != passes->prepass &&
+    const bool nx2_skip = nx2_run_network ? DlssNetworkDroppedForGood()
+                                          : replacement && !recheck_after_dispatch;
+    const bool nx2_skipped = nx2_skip && !passes->IsPrepass(native_key) &&
                              dlss_chain.programs.contains(native_key);
     if (nx2_skipped) {
         static bool nx2_logged = false;

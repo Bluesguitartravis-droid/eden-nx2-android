@@ -15,8 +15,8 @@ build_tag = sys.argv[2] if len(sys.argv) == 3 else "local"
 root = Path(sys.argv[1]).resolve()
 repo = Path(__file__).resolve().parent.parent
 app = root / "src/android/app/src/main"
-kt = app / "java/org/yuzu/yuzu_emu"
-src = repo / "android_overlay/src/main/java/org/yuzu/yuzu_emu/utils/Nx2FlightRecorder.kt"
+kt = app / "java/io/github/zortos293/lichii"
+src = repo / "android_overlay/src/main/java/io/github/zortos293/lichii/utils/Nx2FlightRecorder.kt"
 dst = kt / "utils/Nx2FlightRecorder.kt"
 if not src.is_file() or not dst.parent.is_dir():
     raise SystemExit("Flight recorder overlay or upstream Kotlin directory not found")
@@ -34,66 +34,66 @@ def patch(relative, old, new, check):
     print("patched:", relative)
 
 # Install at process start, before any emulation and without JNI/logging dependencies.
-patch("java/org/yuzu/yuzu_emu/YuzuApplication.kt",
+patch("java/io/github/zortos293/lichii/LichiiApplication.kt",
       "        application = this\n",
       "        application = this\n"
-      "        org.yuzu.yuzu_emu.utils.Nx2FlightRecorder.initialize(this)\n",
+      "        io.github.zortos293.lichii.utils.Nx2FlightRecorder.initialize(this)\n",
       "Nx2FlightRecorder.initialize(this)")
 
-activity = "java/org/yuzu/yuzu_emu/activities/EmulationActivity.kt"
+activity = "java/io/github/zortos293/lichii/activities/EmulationActivity.kt"
 patch(activity,
       "        setContentView(binding.root)\n",
       "        setContentView(binding.root)\n"
-      "        org.yuzu.yuzu_emu.utils.Nx2FlightRecorder.start(this)\n",
+      "        io.github.zortos293.lichii.utils.Nx2FlightRecorder.start(this)\n",
       "Nx2FlightRecorder.start(this)")
 patch(activity,
       "    override fun onResume() {\n        super.onResume()\n",
       "    override fun onResume() {\n        super.onResume()\n"
-      "        org.yuzu.yuzu_emu.utils.Nx2FlightRecorder.resume(this)\n",
+      "        io.github.zortos293.lichii.utils.Nx2FlightRecorder.resume(this)\n",
       "Nx2FlightRecorder.resume(this)")
 patch(activity,
       "    override fun onPause() {\n",
       "    override fun onPause() {\n"
-      "        org.yuzu.yuzu_emu.utils.Nx2FlightRecorder.pause()\n",
+      "        io.github.zortos293.lichii.utils.Nx2FlightRecorder.pause()\n",
       "Nx2FlightRecorder.pause()")
 patch(activity,
       # Anchor on onDestroy: the same removeCallbacks line also opens scheduleRomSwapStopTimeout().
       "        mainHandler.removeCallbacks(romSwapStopTimeoutRunnable)\n        super.onDestroy()\n",
       "        if (isFinishing && !isChangingConfigurations) {\n"
-      "            org.yuzu.yuzu_emu.utils.Nx2FlightRecorder.stop(this)\n"
+      "            io.github.zortos293.lichii.utils.Nx2FlightRecorder.stop(this)\n"
       "        } else {\n"
-      "            org.yuzu.yuzu_emu.utils.Nx2FlightRecorder.pause()\n"
+      "            io.github.zortos293.lichii.utils.Nx2FlightRecorder.pause()\n"
       "        }\n"
       "        mainHandler.removeCallbacks(romSwapStopTimeoutRunnable)\n        super.onDestroy()\n",
       "Nx2FlightRecorder.stop(this)")
 
 # Offer recovered evidence at the normal launcher, including after a native SIGKILL.
-patch("java/org/yuzu/yuzu_emu/ui/main/MainActivity.kt",
+patch("java/io/github/zortos293/lichii/ui/main/MainActivity.kt",
       "        setContentView(binding.root)\n",
       "        setContentView(binding.root)\n"
       "        if (savedInstanceState == null) {\n"
       "            window.decorView.post {\n"
-      "                org.yuzu.yuzu_emu.utils.Nx2FlightRecorder.offerRecovery(this)\n"
+      "                io.github.zortos293.lichii.utils.Nx2FlightRecorder.offerRecovery(this)\n"
       "            }\n"
       "        }\n",
       "Nx2FlightRecorder.offerRecovery(this)")
 
-fragment = "java/org/yuzu/yuzu_emu/fragments/EmulationFragment.kt"
+fragment = "java/io/github/zortos293/lichii/fragments/EmulationFragment.kt"
 patch(fragment,
       "    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {\n"
       "        super.onViewCreated(view, savedInstanceState)\n",
       "    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {\n"
       "        super.onViewCreated(view, savedInstanceState)\n"
-      "        org.yuzu.yuzu_emu.utils.Nx2FlightRecorder.attachSurface(binding.surfaceEmulation)\n",
+      "        io.github.zortos293.lichii.utils.Nx2FlightRecorder.attachSurface(binding.surfaceEmulation)\n",
       "Nx2FlightRecorder.attachSurface(binding.surfaceEmulation)")
 patch(fragment,
       "        updateGameTitle()\n\n"
       "        binding.inGameMenu.menu.findItem(R.id.menu_quick_settings)",
       "        updateGameTitle()\n"
       "        binding.inGameMenu.menu.findItem(R.id.menu_nx2_flight_recovered)?.isVisible =\n"
-      "            org.yuzu.yuzu_emu.utils.Nx2FlightRecorder.hasRecoveredReport()\n"
+      "            io.github.zortos293.lichii.utils.Nx2FlightRecorder.hasRecoveredReport()\n"
       "        binding.inGameMenu.menu.findItem(R.id.menu_nx2_flight_capture)?.title =\n"
-      "            getString(if (org.yuzu.yuzu_emu.utils.Nx2FlightRecorder.screenshotsEnabled(requireContext()))\n"
+      "            getString(if (io.github.zortos293.lichii.utils.Nx2FlightRecorder.screenshotsEnabled(requireContext()))\n"
       "                R.string.nx2_flight_capture_on else R.string.nx2_flight_capture_off)\n\n"
       "        binding.inGameMenu.menu.findItem(R.id.menu_quick_settings)",
       "R.id.menu_nx2_flight_capture)?.title")
@@ -103,16 +103,16 @@ patch(fragment,
       "            when (it.itemId) {\n"
       "                R.id.menu_nx2_flight_recovered -> {\n"
       "                    binding.drawerLayout.closeDrawer(binding.inGameMenu)\n"
-      "                    org.yuzu.yuzu_emu.utils.Nx2FlightRecorder.shareReport(requireActivity(), true)\n"
+      "                    io.github.zortos293.lichii.utils.Nx2FlightRecorder.shareReport(requireActivity(), true)\n"
       "                    true\n"
       "                }\n"
       "                R.id.menu_nx2_flight_report -> {\n"
       "                    binding.drawerLayout.closeDrawer(binding.inGameMenu)\n"
-      "                    org.yuzu.yuzu_emu.utils.Nx2FlightRecorder.shareReport(requireActivity())\n"
+      "                    io.github.zortos293.lichii.utils.Nx2FlightRecorder.shareReport(requireActivity())\n"
       "                    true\n"
       "                }\n"
       "                R.id.menu_nx2_flight_capture -> {\n"
-      "                    val enabled = org.yuzu.yuzu_emu.utils.Nx2FlightRecorder.toggleScreenshots(requireContext())\n"
+      "                    val enabled = io.github.zortos293.lichii.utils.Nx2FlightRecorder.toggleScreenshots(requireContext())\n"
       "                    it.title = getString(if (enabled) R.string.nx2_flight_capture_on\n"
       "                        else R.string.nx2_flight_capture_off)\n"
       "                    true\n"

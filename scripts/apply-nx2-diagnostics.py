@@ -346,10 +346,10 @@ if "#include <unwind.h>" not in c:
 # The frontend's stop request and the summary.
 native = "android/app/src/main/jni/native.cpp"
 patch(native,
-      """void Java_org_yuzu_yuzu_1emu_NativeLibrary_stopEmulation(JNIEnv* env, jclass clazz) {
+      """void Java_io_github_zortos293_lichii_NativeLibrary_stopEmulation(JNIEnv* env, jclass clazz) {
     EmulationSession::GetInstance().HaltEmulation();
 """,
-      """void Java_org_yuzu_yuzu_1emu_NativeLibrary_stopEmulation(JNIEnv* env, jclass clazz) {
+      """void Java_io_github_zortos293_lichii_NativeLibrary_stopEmulation(JNIEnv* env, jclass clazz) {
     LOG_INFO(Frontend, "NX2_STOP the frontend asked to stop");
     EmulationSession::GetInstance().HaltEmulation();
 """,
@@ -379,7 +379,7 @@ patch(native,
 include(native, '#include "common/nx2_session.h"\n')
 
 # Kotlin: who asked for the stop, and the activity's lifecycle.
-kt = root / "android/app/src/main/java/org/yuzu/yuzu_emu"
+kt = root / "android/app/src/main/java/io/github/zortos293/lichii"
 lib = kt / "NativeLibrary.kt"
 t = lib.read_text()
 if "fun nx2StopEmulation" not in t:
@@ -392,7 +392,7 @@ if "fun nx2StopEmulation" not in t:
         val path = Throwable().stackTrace.drop(1).take(7).joinToString(" <- ") {
             it.className.substringAfterLast('.') + "." + it.methodName + ":" + it.lineNumber
         }
-        org.yuzu.yuzu_emu.utils.Log.info("[NX2_STOP] stop requested by " + path)
+        io.github.zortos293.lichii.utils.Log.info("[NX2_STOP] stop requested by " + path)
         stopEmulation()
     }
 """, 1)

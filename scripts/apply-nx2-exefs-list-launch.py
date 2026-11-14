@@ -10,10 +10,10 @@ from pathlib import Path
 import sys
 
 f = (Path(sys.argv[1]).resolve() /
-     "src/android/app/src/main/java/org/yuzu/yuzu_emu/adapters/GameAdapter.kt")
+     "src/android/app/src/main/java/io/github/zortos293/lichii/adapters/GameAdapter.kt")
 t = f.read_text()
 old = """            val gameExists = DocumentFile.fromSingleUri(
-                YuzuApplication.appContext,
+                LichiiApplication.appContext,
                 game.path.toUri()
             )?.exists() == true
 """
@@ -22,7 +22,7 @@ new = """            // NX2: loose ExeFS games are plain file paths, which Docum
                 java.io.File(game.path).exists()
             } else {
                 DocumentFile.fromSingleUri(
-                    YuzuApplication.appContext,
+                    LichiiApplication.appContext,
                     game.path.toUri()
                 )?.exists() == true
             }
@@ -33,7 +33,7 @@ if 'game.path.startsWith("/")' not in t:
     f.write_text(t.replace(old, new, 1))
 
 # .nx archives (upstream's single-file game format, made with Lichii on a PC) show in the list.
-g = Path(sys.argv[1]).resolve() / "src/android/app/src/main/java/org/yuzu/yuzu_emu/model/Game.kt"
+g = Path(sys.argv[1]).resolve() / "src/android/app/src/main/java/io/github/zortos293/lichii/model/Game.kt"
 gt = g.read_text()
 if '"nup", "nx")' not in gt and '"xcz", "nup")' in gt:
     g.write_text(gt.replace('"xcz", "nup")', '"xcz", "nup", "nx")', 1))

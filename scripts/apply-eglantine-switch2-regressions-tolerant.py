@@ -210,13 +210,13 @@ nca.write_text(nca_text)
 #    The pinned Eglantine scanner only recognizes file extensions, so selecting
 #    an exefs folder containing main/main.npdm no longer creates a game entry.
 # ---------------------------------------------------------------------------
-helper = root / "src" / "android" / "app" / "src" / "main" / "java" / "org" / "yuzu" / "yuzu_emu" / "utils" / "GameHelper.kt"
+helper = root / "src" / "android" / "app" / "src" / "main" / "java" / "io" / "github" / "zortos293" / "lichii" / "utils" / "GameHelper.kt"
 helper_text = helper.read_text()
 
 for old, new in [
     ("import android.net.Uri\n", "import android.net.Uri\nimport android.os.Build\nimport android.os.Environment\n"),
     ("import java.io.File\n", "import java.io.File\nimport java.nio.ByteBuffer\nimport java.nio.ByteOrder\n"),
-    ("import org.yuzu.yuzu_emu.model.Game\n", "import org.yuzu.yuzu_emu.model.DirectoryType\nimport org.yuzu.yuzu_emu.model.Game\n"),
+    ("import io.github.zortos293.lichii.model.Game\n", "import io.github.zortos293.lichii.model.DirectoryType\nimport io.github.zortos293.lichii.model.Game\n"),
 ]:
     if new.strip() not in helper_text and old in helper_text:
         helper_text = helper_text.replace(old, new, 1)
@@ -435,7 +435,7 @@ if "private const val EXEFS_SEARCH_DEPTH" not in helper_text:
 
 helper.write_text(helper_text)
 
-game = root / "src" / "android" / "app" / "src" / "main" / "java" / "org" / "yuzu" / "yuzu_emu" / "model" / "Game.kt"
+game = root / "src" / "android" / "app" / "src" / "main" / "java" / "io" / "github" / "zortos293" / "lichii" / "model" / "Game.kt"
 game_text = game.read_text()
 game_text = game_text.replace(
     'listOf("xci", "nsp", "nca", "nro", "nsz", "xcz")',

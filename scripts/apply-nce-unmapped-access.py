@@ -11,7 +11,7 @@ import sys
 
 f = Path(sys.argv[1]).resolve() / "src/core/arm/nce/arm_nce.cpp"
 t = f.read_text()
-old = """    if (memory.InvalidateNCE(addr, Memory::YUZU_PAGESIZE)) {
+old = """    if (memory.InvalidateNCE(addr, Memory::LICHII_PAGESIZE)) {
         // We handled the access successfully and are returning to guest code.
         return true;
     }
@@ -19,7 +19,7 @@ old = """    if (memory.InvalidateNCE(addr, Memory::YUZU_PAGESIZE)) {
     // We couldn't handle the access.
     return HandleFailedGuestFault(guest_ctx, raw_info, raw_context);
 }"""
-new = """    if (memory.InvalidateNCE(addr, Memory::YUZU_PAGESIZE)) {
+new = """    if (memory.InvalidateNCE(addr, Memory::LICHII_PAGESIZE)) {
         // We handled the access successfully and are returning to guest code.
         return true;
     }

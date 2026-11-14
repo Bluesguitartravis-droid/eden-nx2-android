@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // NX2 Android flight recorder: bounded, local, opt-in diagnostic export.
-package org.yuzu.yuzu_emu.utils
+package io.github.zortos293.lichii.utils
 
 import android.app.Activity
 import android.app.ActivityManager
@@ -317,7 +317,7 @@ object Nx2FlightRecorder {
             }.getOrNull() ?: Float.NaN
         } else Float.NaN
         runCatching {
-            org.yuzu.yuzu_emu.utils.Log.info("[NX2_THERMAL] status=" + thermal +
+            io.github.zortos293.lichii.utils.Log.info("[NX2_THERMAL] status=" + thermal +
                 " headroom10s=" + String.format(java.util.Locale.US, "%.2f", headroom) +
                 " pss_mib=" + memory.totalPss / 1024 +
                 " avail_mib=" + system.availMem / 1048576)

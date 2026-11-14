@@ -198,7 +198,7 @@ bool Memory::Nx2CollectNceWrite(Common::ProcessAddress vaddr) {
     }
     using State = Impl::Nx2NceWrites;
     State& state = impl->nx2_nce_writes[core];
-    const u64 page = GetInteger(vaddr) >> YUZU_PAGEBITS;
+    const u64 page = GetInteger(vaddr) >> LICHII_PAGEBITS;
     const u64 now = Nx2NowNs();
     auto& bulk = state.bulk[page % state.bulk.size()];
     if (state.page == page && now - state.since < State::BurstWindowNs) {
@@ -254,7 +254,7 @@ void Memory::Nx2NceWriteNotEmulated(Common::ProcessAddress vaddr) {
         return;
     }
     Impl::Nx2NceWrites& state = impl->nx2_nce_writes[core];
-    const u64 page = GetInteger(vaddr) >> YUZU_PAGEBITS;
+    const u64 page = GetInteger(vaddr) >> LICHII_PAGEBITS;
     state.bulk[page % state.bulk.size()] = {page, Nx2NowNs() + Impl::Nx2NceWrites::BulkNs};
     state.page = ~u64{0};
     Common::Nx2NceWrites::not_emulated.fetch_add(1, std::memory_order_relaxed);
@@ -272,7 +272,7 @@ p.write_text(t)
 
 # The fault handler.
 patch("core/arm/nce/arm_nce.cpp",
-      """    if (memory.InvalidateNCE(addr, Memory::YUZU_PAGESIZE)) {
+      """    if (memory.InvalidateNCE(addr, Memory::LICHII_PAGESIZE)) {
         // We handled the access successfully and are returning to guest code.
         return true;
     }
@@ -292,7 +292,7 @@ patch("core/arm/nce/arm_nce.cpp",
         }
         memory.Nx2NceWriteNotEmulated(addr);
     }
-    if (memory.InvalidateNCE(addr, Memory::YUZU_PAGESIZE)) {
+    if (memory.InvalidateNCE(addr, Memory::LICHII_PAGESIZE)) {
         // We handled the access successfully and are returning to guest code.
         return true;
     }

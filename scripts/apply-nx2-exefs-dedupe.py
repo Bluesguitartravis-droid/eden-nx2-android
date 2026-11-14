@@ -5,7 +5,7 @@ with the update bit cleared, as the container scan already does."""
 from pathlib import Path
 import sys
 
-f = Path(sys.argv[1]).resolve() / "src/android/app/src/main/java/org/yuzu/yuzu_emu/utils/GameHelper.kt"
+f = Path(sys.argv[1]).resolve() / "src/android/app/src/main/java/io/github/zortos293/lichii/utils/GameHelper.kt"
 t = f.read_text()
 old = """            val duplicate = games.any {
                 it.path == game.path ||

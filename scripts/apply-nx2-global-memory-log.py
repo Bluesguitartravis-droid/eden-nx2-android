@@ -65,7 +65,7 @@ text = text.replace(anchor, anchor + r'''
                             break;
                         default:
                             if (inst.GetOpcode() >= Shader::IR::Opcode::GlobalAtomicIAdd32 &&
-                                inst.GetOpcode() <= Shader::IR::Opcode::GlobalAtomicExchange64) {
+                                inst.GetOpcode() <= Shader::IR::Opcode::GlobalAtomicMaxF32x2) {
                                 ++atomics;
                             }
                             break;

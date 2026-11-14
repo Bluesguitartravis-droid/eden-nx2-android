@@ -8,11 +8,12 @@ World 8 of 12 mesh pipeline types have them (about 55,000 dropped draws a minute
 and missing scenery).
 
 This keeps the same design and adds the per-primitive lines:
-- block layout: vertices, then max_primitives * 3 indices, then max_primitives *
+- block layout: vertices, then max_primitives * corners indices (3, or 2/1 for lines and
+  points since Lichii's 2026-11-13 base), then max_primitives *
   primitive_lines words (primitive p, line l at p * primitive_lines + l);
 - the compute epilogue copies them from workgroup memory;
-- the emulation's vertex shader knows its primitive (it draws one triangle per primitive slot),
-  so it writes each per-primitive generic to all three corners as a flat output, and Layer /
+- the emulation's vertex shader knows its primitive (it draws one primitive per slot),
+  so it writes each per-primitive generic to all its corners as a flat output, and Layer /
   ViewportIndex as vertex outputs (VK_EXT_shader_viewport_index_layer);
 - the fragment program reads those generics Flat instead of PerPrimitiveEXT.
 PrimitiveId written per primitive is not passed on (the fragment sees the draw's own id).
@@ -45,11 +46,12 @@ def patch(rel, edits):
 # Block layout.
 patch("src/shader_recompiler/backend/spirv/emit_spirv.h", [(
     "    return mesh.max_vertices * static_cast<u32>(mesh.vertex_lines.size()) +\n"
-    "           mesh.max_primitives * 3;\n",
+    "           mesh.max_primitives * mesh.PrimitiveVertices();\n",
     "    // " + MARK + ": then max_primitives * primitive_lines words\n"
     "    // (primitive p, line l at p * primitive_lines + l).\n"
     "    return mesh.max_vertices * static_cast<u32>(mesh.vertex_lines.size()) +\n"
-    "           mesh.max_primitives * (3 + static_cast<u32>(mesh.primitive_lines.size()));\n",
+    "           mesh.max_primitives *\n"
+    "               (mesh.PrimitiveVertices() + static_cast<u32>(mesh.primitive_lines.size()));\n",
 )])
 
 # Runtime info: fragment generics that arrive flat from the emulation's vertex shader.
@@ -87,11 +89,11 @@ patch(mesh_cpp, [
         "        }\n"
         "    }\n"
         "    // " + MARK + ": primitive p, line l at\n"
-        "    // index_base + max_primitives * 3 + p * primitive_lines + l.\n"
+        "    // index_base + max_primitives * corners + p * primitive_lines + l.\n"
         "    const u32 primitive_lines{static_cast<u32>(mesh.primitive_lines.size())};\n"
         "    if (primitive_lines != 0) {\n"
         "        const Id primitive_base{\n"
-        "            ctx.OpIAdd(ctx.U32[1], index_base, ctx.Const(mesh.max_primitives * 3))};\n"
+        "            ctx.OpIAdd(ctx.U32[1], index_base, ctx.Const(mesh.max_primitives * corners))};\n"
         "        for (u32 first = 0; first < mesh.max_primitives; first += threads) {\n"
         "            const Id primitive{ctx.OpIAdd(ctx.U32[1], invocation, ctx.Const(first))};\n"
         "            const auto copy = [&] {\n"
@@ -163,13 +165,12 @@ patch(mesh_cpp, [
         "        interfaces.push_back(buffer);\n",
     ),
     (
-        "    module.OpStore(position, default_vec4);\n"
         "    for (const Id generic : generics) {\n"
         "        if (Sirit::ValidId(generic)) {\n"
         "            module.OpStore(generic, default_vec4);\n"
         "        }\n"
-        "    }\n",
-        "    module.OpStore(position, default_vec4);\n"
+        "    }\n"
+        "    Id position_z{}, position_w{};\n",
         "    for (const Id generic : generics) {\n"
         "        if (Sirit::ValidId(generic)) {\n"
         "            module.OpStore(generic, default_vec4);\n"
@@ -179,17 +180,18 @@ patch(mesh_cpp, [
         "        if (Sirit::ValidId(generic)) {\n"
         "            module.OpStore(generic, default_vec4);\n"
         "        }\n"
-        "    }\n",
+        "    }\n"
+        "    Id position_z{}, position_w{};\n",
     ),
     (
         "    // OpenGL-style clip space, as the mesh epilogue's ConvertDepth: z = (z + w) / 2.\n",
-        "    // " + MARK + ": this triangle's per-primitive words.\n"
+        "    // " + MARK + ": this primitive's per-primitive words.\n"
         "    if (const u32 primitive_lines{static_cast<u32>(mesh.primitive_lines.size())};\n"
         "        primitive_lines != 0) {\n"
         "        const Id primitive_words{module.OpIAdd(\n"
         "            u32_type,\n"
         "            module.OpIAdd(u32_type, block,\n"
-        "                          constant(mesh.max_vertices * vertex_lines + mesh.max_primitives * 3)),\n"
+        "                          constant(mesh.max_vertices * vertex_lines + mesh.max_primitives * corners)),\n"
         "            module.OpIMul(u32_type, primitive, constant(primitive_lines)))};\n"
         "        for (u32 line = 0; line < primitive_lines; ++line) {\n"
         "            const IR::Attribute attribute{mesh.primitive_lines[line]};\n"
@@ -253,9 +255,10 @@ patch("src/video_core/renderer_vulkan/vk_pipeline_cache.cpp", [
         "// Without VK_EXT_mesh_shader: logs, once per shader set, what a skipped task/mesh pipeline would\n",
     ),
     (
-        "        eligible = eligible && mesh.mesh.topology == 4 && mesh.mesh.primitive_lines.empty() &&\n",
-        "        eligible = eligible && mesh.mesh.topology == 4 &&\n"
-        "                   Nx2MeshPrimitiveLinesOk(mesh.mesh, device) &&\n",
+        "                   mesh.mesh.primitive_lines.empty() &&\n"
+        "                   !mesh.mesh.vertex_lines.empty() && mesh.mesh.max_vertices != 0 &&\n",
+        "                   Nx2MeshPrimitiveLinesOk(mesh.mesh, device) &&\n"
+        "                   !mesh.mesh.vertex_lines.empty() && mesh.mesh.max_vertices != 0 &&\n",
     ),
     (
         "        auto runtime_info{MakeRuntimeInfo(programs, key, program, previous_stage, device)};\n",

@@ -91,8 +91,10 @@ jobs:
           # Lichii is zortos293's continuation of Eglantine nx2 (9a435b5 is an ancestor).
           git clone --recursive --branch nx2 --single-branch \
             https://github.com/zortos293/Lichii.git upstream
-          # faa4bd13a: Lichii nx2 of 2026-11-12 (107 commits after cb5c5c7c6, the base of builds 147-158).
-          git -C upstream checkout faa4bd13a
+          # dc9af208e: Lichii nx2 of 2026-11-14 09:29 UTC (170 commits after faa4bd13a, the base of
+          # builds 159-169). Lichii renamed the Kotlin package to io.github.zortos293.lichii; the
+          # applicationId (dev.eden.eden_emulator), so the app's data folder, is unchanged.
+          git -C upstream checkout dc9af208e
           # godpow's ARM64 macro JIT (Djihads80/Eglantine PR #503, from an Odin 3), with the
           # split front using it; EDEN_NX2_MME_JIT=0 goes back to the interpreter.
           git -C upstream -c user.name=ci -c user.email=ci@localhost \
@@ -101,7 +103,7 @@ jobs:
           # now: with them (131-136) Mario Kart World flashed blue and drew low-detail models.
           git -C upstream submodule update --init --recursive
           echo "NX2_COMMIT=$(git -C upstream rev-parse HEAD)" >> "$GITHUB_ENV"
-          echo "NX2_UPSTREAM=zortos293/Lichii:nx2@faa4bd1+jit" >> "$GITHUB_ENV"
+          echo "NX2_UPSTREAM=zortos293/Lichii:nx2@dc9af20+jit" >> "$GITHUB_ENV"
           git -C upstream log -1 --oneline
 
       - name: Install host build tools
@@ -151,7 +153,7 @@ jobs:
           python3 -m py_compile scripts/apply-nx2-direct-exefs.py
           python3 scripts/apply-nx2-direct-exefs.py upstream
           grep -n 'Launch ExeFS game folder' upstream/src/android/app/src/main/res/values/strings.xml
-          grep -n 'showAddDirectoryMenu(binding.addDirectory)' upstream/src/android/app/src/main/java/org/yuzu/yuzu_emu/ui/GamesFragment.kt
+          grep -n 'showAddDirectoryMenu(binding.addDirectory)' upstream/src/android/app/src/main/java/io/github/zortos293/lichii/ui/GamesFragment.kt
           grep -n 'NX2_LOOSE_ROMFS mode=base+update' upstream/src/core/loader/deconstructed_rom_directory.cpp
 
       - name: Decode prefixed ZBIC NSO frames and add content diagnostics
@@ -294,6 +296,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-gmem-hoist.py upstream
 
+      - name: Driver statistics per pipeline with EDEN_NX2_PIPELINE_STATS=1 (NX2_PSTATS)
+        shell: bash
+        run: python3 scripts/apply-nx2-pipeline-stats.py upstream
+
       - name: Log host CPU clocks every 10 s (thermal throttling check)
         shell: bash
         run: python3 scripts/apply-nx2-cpu-clocks.py upstream
@@ -307,7 +313,7 @@ jobs:
         run: |
           python3 -m py_compile scripts/apply-nx2-flight-recorder.py
           python3 scripts/apply-nx2-flight-recorder.py upstream "build-${{ github.run_number }}"
-          grep -q 'object Nx2FlightRecorder' upstream/src/android/app/src/main/java/org/yuzu/yuzu_emu/utils/Nx2FlightRecorder.kt
+          grep -q 'object Nx2FlightRecorder' upstream/src/android/app/src/main/java/io/github/zortos293/lichii/utils/Nx2FlightRecorder.kt
 
       - name: NCE opens pages with GPU-written bytes for writing without waiting
         shell: bash

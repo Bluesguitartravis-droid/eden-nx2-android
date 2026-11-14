@@ -216,7 +216,7 @@ helper_text = helper.read_text()
 for old, new in [
     ("import android.net.Uri\n", "import android.net.Uri\nimport android.os.Build\nimport android.os.Environment\n"),
     ("import java.io.File\n", "import java.io.File\nimport java.nio.ByteBuffer\nimport java.nio.ByteOrder\n"),
-    ("import org.yuzu.yuzu_emu.model.Game\n", "import org.yuzu.yuzu_emu.model.DirectoryType\nimport org.yuzu.yuzu_emu.model.Game\n"),
+    ("import io.github.zortos293.lichii.model.Game\n", "import io.github.zortos293.lichii.model.DirectoryType\nimport io.github.zortos293.lichii.model.Game\n"),
 ]:
     if new.strip() not in helper_text and old in helper_text:
         helper_text = helper_text.replace(old, new, 1)

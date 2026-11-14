@@ -21,6 +21,9 @@ Builds 165-168 also called the init function at the start of every block after a
 ahead of that block's OpPhi instructions: invalid SPIR-V that every driver (Turnip V34, V39 and
 Qualcomm's) rejected as VK_ERROR_OUT_OF_HOST_MEMORY, about 30 Ocarina pipelines that then drew
 nothing. From build 169 only the entry block calls it.
+Programs that write global memory or use global atomics are left alone too.
+Lichii's base of 2026-11-14 (build 170) routes with one branch per buffer and a single return
+(#619); the bases are still read on every call there, so the hoist applies the same way.
 EDEN_NX2_GMEM_HOIST=0 restores the old code.
 Usage: python3 scripts/apply-nx2-gmem-hoist.py <upstream-root>
 """
@@ -93,21 +96,26 @@ patch("spirv_emit_context.cpp", [
         "                         info.native_global_bounds &&\n"
         "                         !info.storage_buffers_descriptors.empty() &&\n"
         "                         std::ranges::none_of(info.storage_buffers_descriptors,\n"
-        "                                              [](const auto& desc) { return desc.is_written; })};\n"
+        "                                              [](const auto& desc) { return desc.is_written; }) &&\n"
+        "                         std::ranges::none_of(program.blocks, [](const IR::Block* block) {\n"
+        "                             return std::ranges::any_of(block->Instructions(), [](const IR::Inst& inst) {\n"
+        "                                 const IR::Opcode op{inst.GetOpcode()};\n"
+        "                                 return (op >= IR::Opcode::WriteGlobalU8 &&\n"
+        "                                         op <= IR::Opcode::WriteGlobal128) ||\n"
+        "                                        (op >= IR::Opcode::GlobalAtomicIAdd32 &&\n"
+        "                                         op <= IR::Opcode::GlobalAtomicMaxF32x2);\n"
+        "                             });\n"
+        "                         })};\n"
         "    std::vector<Id> nx2_base_vars;\n",
     ),
     (
-        "        if (info.native_global_bounds) {\n"
-        "            // Native pointers carry no NVN size word. The address belongs to the candidate buffer\n"
-        "            // whose base is the closest one at or below it (bounds come from the binding).\n"
-        "            std::vector<Id> bases(num_buffers);\n"
-        "            Id best_index{Const(~0U)};\n"
-        "            Id best_distance{Constant(U64, ~u64{0})};\n"
-        "            for (size_t index = 0; index < num_buffers; ++index) {\n"
-        "                bases[index] = base_address(index);\n",
+        "        std::vector<u32> candidates;\n"
+        "        std::vector<Id> bases;\n"
+        "        Id route{Const(~0U)};\n"
+        "        if (info.native_global_bounds) {\n",
         "        if (nx2_hoist && nx2_base_vars.empty()) {\n"
-        "            // " + MARK + ": the first helper defines the variables and the function\n"
-        "            // that fills them. The helper's own block is suspended while it is emitted.\n"
+        "            // " + MARK + ": the first helper defines the variables (the function\n"
+        "            // that fills them is defined after the u32 helpers).\n"
         "            const Id u64_private{TypePointer(spv::StorageClass::Private, U64)};\n"
         "            for (size_t index = 0; index < num_buffers; ++index) {\n"
         "                nx2_base_vars.push_back(AddGlobalVariable(u64_private, spv::StorageClass::Private));\n"
@@ -116,15 +124,17 @@ patch("spirv_emit_context.cpp", [
         "                interfaces.insert(interfaces.end(), nx2_base_vars.begin(), nx2_base_vars.end());\n"
         "            }\n"
         "        }\n"
-        "        if (info.native_global_bounds) {\n"
-        "            // Native pointers carry no NVN size word. The address belongs to the candidate buffer\n"
-        "            // whose base is the closest one at or below it (bounds come from the binding).\n"
-        "            std::vector<Id> bases(num_buffers);\n"
-        "            Id best_index{Const(~0U)};\n"
-        "            Id best_distance{Constant(U64, ~u64{0})};\n"
-        "            for (size_t index = 0; index < num_buffers; ++index) {\n"
-        "                bases[index] = nx2_hoist ? OpLoad(U64, nx2_base_vars[index])\n"
-        "                                         : base_address(index);\n",
+        "        std::vector<u32> candidates;\n"
+        "        std::vector<Id> bases;\n"
+        "        Id route{Const(~0U)};\n"
+        "        if (info.native_global_bounds) {\n",
+    ),
+    (
+        "                const Id base{base_address(index)};\n"
+        "                const Id distance{OpISub(U64, addr, base)};\n",
+        "                const Id base{nx2_hoist ? OpLoad(U64, nx2_base_vars[index])\n"
+        "                                        : base_address(index)};\n"
+        "                const Id distance{OpISub(U64, addr, base)};\n",
     ),
     (
         "    std::tie(load_global_func_u32, write_global_func_u32) =\n"

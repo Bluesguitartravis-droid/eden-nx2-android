@@ -7,18 +7,18 @@ from pathlib import Path
 import sys
 
 f = (Path(sys.argv[1]).resolve() /
-     "src/android/app/src/main/java/org/yuzu/yuzu_emu/model/GamesViewModel.kt")
+     "src/android/app/src/main/java/io/github/zortos293/lichii/model/GamesViewModel.kt")
 t = f.read_text()
 old = """                                val gameExists =
                                     DocumentFile.fromSingleUri(
-                                        YuzuApplication.appContext,
+                                        LichiiApplication.appContext,
                                         Uri.parse(game.path)
                                     )?.exists()"""
 new = """                                val gameExists = if (game.path.startsWith("/")) {
                                     java.io.File(game.path).exists()
                                 } else {
                                     DocumentFile.fromSingleUri(
-                                        YuzuApplication.appContext,
+                                        LichiiApplication.appContext,
                                         Uri.parse(game.path)
                                     )?.exists()
                                 }"""

@@ -17,6 +17,10 @@ the program does not write.
 Build 165 computed them lazily (a private bool and a branch in every helper) and build 166 in an
 entry-point function: Turnip's compiler crashed on both, at the same place, building Ocarina's
 compute programs. From build 167 only graphics stages are changed (where the measured cost is).
+Builds 165-168 also called the init function at the start of every block after an if or a loop,
+ahead of that block's OpPhi instructions: invalid SPIR-V that every driver (Turnip V34, V39 and
+Qualcomm's) rejected as VK_ERROR_OUT_OF_HOST_MEMORY, about 30 Ocarina pipelines that then drew
+nothing. From build 169 only the entry block calls it.
 EDEN_NX2_GMEM_HOIST=0 restores the old code.
 Usage: python3 scripts/apply-nx2-gmem-hoist.py <upstream-root>
 """
@@ -51,15 +55,23 @@ patch("spirv_emit_context.h", [(
 )])
 
 patch("emit_spirv.cpp", [(
+    "    IR::Block* current_block{};\n"
+    "    for (const IR::AbstractSyntaxNode& node : program.syntax_list) {\n",
+    "    IR::Block* current_block{};\n"
+    "    // " + MARK + ": only the first block calls the init function. current_block is\n"
+    "    // cleared after every if/loop node, so it cannot tell the entry block (builds 165-168 also\n"
+    "    // called it at the top of merge blocks, before their OpPhi: invalid, the pipeline failed).\n"
+    "    bool nx2_bases_called{};\n"
+    "    for (const IR::AbstractSyntaxNode& node : program.syntax_list) {\n",
+), (
     "            current_block = node.data.block;\n"
     "            ctx.AddLabel(label);\n",
-    "            const bool nx2_entry_block{current_block == nullptr};\n"
     "            current_block = node.data.block;\n"
     "            ctx.AddLabel(label);\n"
-    "            if (nx2_entry_block && Sirit::ValidId(ctx.nx2_init_global_bases)) {\n"
-    "                // " + MARK + "\n"
+    "            if (!nx2_bases_called && Sirit::ValidId(ctx.nx2_init_global_bases)) {\n"
     "                ctx.OpFunctionCall(ctx.void_id, ctx.nx2_init_global_bases);\n"
-    "            }\n",
+    "            }\n"
+    "            nx2_bases_called = true;\n",
 )])
 
 patch("spirv_emit_context.cpp", [

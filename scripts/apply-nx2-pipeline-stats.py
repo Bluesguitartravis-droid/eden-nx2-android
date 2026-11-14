@@ -7,7 +7,9 @@ three compute programs (s6:e40f5efb5480e692, s6:03bf0ffc7d2d0bed, s6:9302bc0d6d1
 frame. Whether that is register pressure (few waves per core), spilling or plain instruction count
 decides what can be done about it, and only the driver knows.
 
-With the switch on, the device enables VK_KHR_pipeline_executable_properties, pipelines are built
+EDEN_NX2_PIPELINE_STATS=1 logs compute pipelines only (build 170 logged graphics ones too: the
+lines filled the log and pushed the boot-time compute builds out of the report), =2 both. With
+the switch on, the device enables VK_KHR_pipeline_executable_properties, pipelines are built
 with VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR, and each one logs one line per executable:
 
   NX2_PSTATS compute s6:<hash> [<executable>] Instruction Count=... Max Waves Per Core=... ...
@@ -41,12 +43,24 @@ MARK = "NX2_PSTATS"
 
 namespace Vulkan {
 
-inline bool Nx2PipelineStatsEnabled() {
-    static const bool enabled{[] {
+/// 0 off, 1 compute pipelines, 2 compute and graphics pipelines.
+inline int Nx2PipelineStatsLevel() {
+    static const int level{[] {
         const char* const value{std::getenv("EDEN_NX2_PIPELINE_STATS")};
-        return value != nullptr && value[0] == '1';
+        if (value == nullptr) {
+            return 0;
+        }
+        return value[0] == '1' ? 1 : value[0] == '2' ? 2 : 0;
     }()};
-    return enabled;
+    return level;
+}
+
+inline bool Nx2PipelineStatsEnabled() {
+    return Nx2PipelineStatsLevel() > 0;
+}
+
+inline bool Nx2GraphicsPipelineStatsEnabled() {
+    return Nx2PipelineStatsLevel() > 1;
 }
 
 inline void Nx2LogPipelineStats(const Device& device, VkPipeline pipeline, std::string_view label) {
@@ -119,7 +133,7 @@ patch(root / "vulkan_common/vulkan_device.cpp", [(
     "    // VK_KHR_pipeline_executable_properties (also for EDEN_NX2_PIPELINE_STATS=1, NX2_PSTATS)\n"
     "    if (Settings::values.renderer_shader_feedback.GetValue() || [] {\n"
     "            const char* const value{std::getenv(\"EDEN_NX2_PIPELINE_STATS\")};\n"
-    "            return value != nullptr && value[0] == '1';\n"
+    "            return value != nullptr && (value[0] == '1' || value[0] == '2');\n"
     "        }()) {\n",
 )], include_after=("#include <algorithm>\n", "#include <cstdlib>\n"))
 
@@ -152,14 +166,14 @@ patch(vk / "vk_graphics_pipeline.cpp", [
         "    VkPipelineCreateFlags flags{};\n"
         "    if (device.IsKhrPipelineExecutablePropertiesEnabled() && Settings::values.renderer_debug.GetValue()) {\n",
         "    VkPipelineCreateFlags flags{};\n"
-        "    if (device.IsKhrPipelineExecutablePropertiesEnabled() && Nx2PipelineStatsEnabled()) {\n"
+        "    if (device.IsKhrPipelineExecutablePropertiesEnabled() && Nx2GraphicsPipelineStatsEnabled()) {\n"
         "        flags |= VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR; // NX2_PSTATS\n"
         "    }\n"
         "    if (device.IsKhrPipelineExecutablePropertiesEnabled() && Settings::values.renderer_debug.GetValue()) {\n",
     ),
     (
         "    TracePipelineBuild(\"END\", \"graphics\", key.Hash(), key.unique_hashes, unoptimized,\n",
-        "    if (Nx2PipelineStatsEnabled()) {\n"
+        "    if (Nx2GraphicsPipelineStatsEnabled()) {\n"
         "        std::string nx2_label{fmt::format(\"graphics {:016x}\", key.Hash())};\n"
         "        for (size_t nx2_stage = 0; nx2_stage < key.unique_hashes.size(); ++nx2_stage) {\n"
         "            if (key.unique_hashes[nx2_stage] != 0) {\n"

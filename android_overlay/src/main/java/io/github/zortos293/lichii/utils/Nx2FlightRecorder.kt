@@ -52,6 +52,7 @@ object Nx2FlightRecorder {
     private const val CAPTURE_INTERVAL_MS = 2500L
     private const val MAX_EVENTS_BYTES = 2L * 1024L * 1024L
     private const val MAX_NATIVE_LOG_BYTES = 4L * 1024L * 1024L
+    private const val LOG_HEAD_BYTES = 1024L * 1024L
     private val mainHandler = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadScheduledExecutor { task ->
         Thread(task, "NX2-Flight-IO").apply { isDaemon = true }
@@ -486,6 +487,11 @@ object Nx2FlightRecorder {
                     val file = File(logDir, name)
                     if (file.isFile) {
                         addZipTail(zip, "logs/" + name, file, MAX_NATIVE_LOG_BYTES)
+                        if (name == "eden_log.txt" && file.length() > MAX_NATIVE_LOG_BYTES) {
+                            // The tail of a long session lost its start (game load, the
+                            // pipelines built at boot): its first MiB goes in too.
+                            addZipHead(zip, "logs/eden_log_head.txt", file, LOG_HEAD_BYTES)
+                        }
                     }
                 }
             }
@@ -495,6 +501,7 @@ object Nx2FlightRecorder {
                 "Screenshots are sampled at 480x270, every 2.5 seconds, 12 frames retained.\n" +
                 "Events are bounded to 2x2 MiB; native logs contain at most their last 4 MiB.\n" +
                 "logs/session_log.txt: the last 2 MiB of this session's own log, saved every 10 s.\n" +
+                "logs/eden_log_head.txt: the first MiB of eden_log.txt when it is longer than 4 MiB.\n" +
                 "Android termination metadata is added after relaunch when available.\n" +
                 "These are diagnostic samples, not a deterministic guest/GPU replay.\n" +
                 "Review before sharing: logs may contain game titles and local file paths.\n"
@@ -531,6 +538,21 @@ object Nx2FlightRecorder {
         if (file.length() > max) return
         zip.putNextEntry(ZipEntry(name))
         file.inputStream().use { it.copyTo(zip, 16384) }
+        zip.closeEntry()
+    }
+
+    private fun addZipHead(zip: ZipOutputStream, name: String, file: File, max: Long) {
+        zip.putNextEntry(ZipEntry(name))
+        file.inputStream().use { source ->
+            val buffer = ByteArray(16384)
+            var remaining = max
+            while (remaining > 0) {
+                val n = source.read(buffer, 0, minOf(remaining, buffer.size.toLong()).toInt())
+                if (n <= 0) break
+                zip.write(buffer, 0, n)
+                remaining -= n
+            }
+        }
         zip.closeEntry()
     }
 

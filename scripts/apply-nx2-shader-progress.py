@@ -14,7 +14,7 @@ Now the text names the step and counts it, with a time estimate once a step has 
 Native side: the precache builder's steps report as stages 10-13 and the renderer's precache
 (Warm) as stage 3, where it was folded into Build. The bar is indeterminate while a step has no
 total.
-First built in build 173.
+First built in build 173; the R8 keep rule for LoadCallbackStage from build 177.
 Usage: python3 scripts/apply-nx2-shader-progress.py <upstream-root>
 """
 from pathlib import Path
@@ -212,4 +212,15 @@ patch(java / "fragments/EmulationFragment.kt", [(
     "            }\n"
     "        }\n",
 )])
+# The Kotlin code above no longer uses the LoadCallbackStage enum, so R8 removed it, but the
+# native library looks the class up when it loads (id_cache.cpp: FindClass of
+# DiskShaderCacheProgress$LoadCallbackStage): builds 173-176 aborted at start with
+# ClassNotFoundException. Keep it.
+rules = root / "src/android/app/proguard-rules.pro"
+keep = ("\n# " + MARK + ": looked up by the native library (id_cache.cpp)\n"
+        "-keep class io.github.zortos293.lichii.disk_shader_cache.DiskShaderCacheProgress$LoadCallbackStage { *; }\n")
+text = rules.read_text()
+if "DiskShaderCacheProgress$LoadCallbackStage" not in text:
+    rules.write_text(text.rstrip("\n") + "\n" + keep)
+    print("proguard-rules.pro: LoadCallbackStage kept")
 print("shader loading progress installed")

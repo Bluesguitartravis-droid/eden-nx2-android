@@ -304,9 +304,8 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-shader-precache.py upstream
 
-      - name: Precache and build-all-cached shaders as settings (global and per game)
-        shell: bash
-        run: python3 scripts/apply-nx2-precache-setting.py upstream
+      # Build 175 (precache settings) closed at its splash screen; left out from build 176 until
+      # its crash is known: scripts/apply-nx2-precache-setting.py
 
       - name: Shader loading screen shows the step, count and time left
         shell: bash

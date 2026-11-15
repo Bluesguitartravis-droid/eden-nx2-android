@@ -77,6 +77,7 @@ object Nx2FlightRecorder {
         app = application
         val base = File(application.filesDir, "nx2-flight-recorder")
         base.mkdirs()
+        installStartupCrashLog(base)
         baseDir = base
         recoverPreviousProcess(application, base)
         worker.scheduleAtFixedRate({
@@ -87,6 +88,23 @@ object Nx2FlightRecorder {
             }
         }, 10, 10, TimeUnit.SECONDS)
         Log.i(TAG, "Flight recorder initialized (local-only)")
+    }
+
+    /** Java/Kotlin crashes anywhere in the app (build 175 closed at its splash screen) are written
+     * to last_app_crash.txt, kept for the next report, then handed to the default handler. */
+    private fun installStartupCrashLog(base: File) {
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, error ->
+            runCatching {
+                val trace = java.io.StringWriter().also {
+                    error.printStackTrace(java.io.PrintWriter(it))
+                }.toString()
+                File(base, "last_app_crash.txt").writeText(
+                    "time_ms=${System.currentTimeMillis()} build=$NX2_BUILD thread=${thread.name}\n" +
+                        trace.take(64 * 1024))
+            }
+            previous?.uncaughtException(thread, error)
+        }
     }
 
     private fun recoverPreviousProcess(context: Context, base: File) {
@@ -514,6 +532,9 @@ object Nx2FlightRecorder {
             val sessionLog = File(dir, "session_log.txt")
             if (sessionLog.isFile) {
                 addZipFile(zip, "logs/session_log.txt", sessionLog, MAX_NATIVE_LOG_BYTES)
+            }
+            baseDir?.let { File(it, "last_app_crash.txt") }?.takeIf { it.isFile }?.let {
+                addZipFile(zip, "logs/last_app_crash.txt", it, MAX_NATIVE_LOG_BYTES)
             }
             val logDir = context.getExternalFilesDir(null)?.let { File(it, "log") }
             if (logDir != null) {

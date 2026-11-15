@@ -83,7 +83,10 @@ if "#include <atomic>" not in t:
     t = t.replace("#pragma once\n", "#pragma once\n\n#include <atomic>\n", 1)
     p.write_text(t)
 
-patch("renderer_vulkan/vk_scheduler.cpp",
+# The download log line rides the finish-site profiler (apply-nx2-finish-sites.py), which main
+# builds leave out: without it there is nothing to attach the line to.
+if "nx2_finishes" in (root / "renderer_vulkan/vk_scheduler.cpp").read_text():
+  patch("renderer_vulkan/vk_scheduler.cpp",
       """    std::vector<std::tuple<u64, u64, std::string>> nx2_finishes;""",
       """    LOG_INFO(Render_Vulkan, "NX2 mapped download {:.0f}/s waiting {:.1f} ms/s",
              static_cast<double>(VideoCommon::Nx2Profile::g_nx2_mapped_downloads.exchange(0)) / seconds,

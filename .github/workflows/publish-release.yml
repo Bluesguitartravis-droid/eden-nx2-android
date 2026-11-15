@@ -83,9 +83,23 @@ jobs:
             "" \
             '```' "$(cat dist/build-info.txt 2>/dev/null)" '```')"
 
-          gh release delete "$TAG" --cleanup-tag --yes -R "$GITHUB_REPOSITORY" 2>/dev/null || true
-          gh release create "$TAG" dist/* -R "$GITHUB_REPOSITORY" \
-            --target "$SHA" \
-            --title "Eden NX2 Android build ${RUN_NUMBER}" \
-            --notes "$NOTES" \
-            --latest
+          # A commit that changes a workflow cannot be a release target for this token (HTTP 403
+          # "Resource not accessible by integration", build 180): from the third attempt the tag
+          # goes on main instead; the notes name the commit.
+          for attempt in 1 2 3 4 5; do
+            gh release delete "$TAG" --cleanup-tag --yes -R "$GITHUB_REPOSITORY" 2>/dev/null || true
+            TARGET="$SHA"
+            if [ "$attempt" -ge 3 ]; then
+              TARGET=main
+            fi
+            if gh release create "$TAG" dist/* -R "$GITHUB_REPOSITORY" \
+                --target "$TARGET" \
+                --title "Eden NX2 Android build ${RUN_NUMBER}" \
+                --notes "$NOTES" \
+                --latest; then
+              exit 0
+            fi
+            echo "Publish attempt $attempt failed; retrying in $((attempt * 20)) s"
+            sleep $((attempt * 20))
+          done
+          exit 1

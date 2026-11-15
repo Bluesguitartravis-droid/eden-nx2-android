@@ -12,7 +12,7 @@ on:
         type: boolean
         default: false
   push:
-    branches: [ main, fix/embedded-switch2-npdm, claude/lichii-test ]
+    branches: [ main, fix/embedded-switch2-npdm, claude/lichii-test, feature/nx2-flight-recorder ]
     paths:
       - ".github/workflows/android-build.yml"
       - "patches/**"
@@ -91,10 +91,19 @@ jobs:
           # Lichii is zortos293's continuation of Eglantine nx2 (9a435b5 is an ancestor).
           git clone --recursive --branch nx2 --single-branch \
             https://github.com/zortos293/Lichii.git upstream
-          git -C upstream checkout 27226d256
+          # dc9af208e: Lichii nx2 of 2026-11-14 09:29 UTC (170 commits after faa4bd13a, the base of
+          # builds 159-169). Lichii renamed the Kotlin package to io.github.zortos293.lichii; the
+          # applicationId (dev.eden.eden_emulator), so the app's data folder, is unchanged.
+          git -C upstream checkout dc9af208e
+          # godpow's ARM64 macro JIT (Djihads80/Eglantine PR #503, from an Odin 3), with the
+          # split front using it; EDEN_NX2_MME_JIT=0 goes back to the interpreter.
+          git -C upstream -c user.name=ci -c user.email=ci@localhost \
+            am --3way "$GITHUB_WORKSPACE/patches/arm64-macro-jit.patch"
+          # godpow's memory/texture fixes (patches/godpow-memory-textures.patch) are left out for
+          # now: with them (131-136) Mario Kart World flashed blue and drew low-detail models.
           git -C upstream submodule update --init --recursive
           echo "NX2_COMMIT=$(git -C upstream rev-parse HEAD)" >> "$GITHUB_ENV"
-          echo "NX2_UPSTREAM=zortos293/Lichii:nx2@27226d2" >> "$GITHUB_ENV"
+          echo "NX2_UPSTREAM=zortos293/Lichii:nx2@dc9af20+jit" >> "$GITHUB_ENV"
           git -C upstream log -1 --oneline
 
       - name: Install host build tools
@@ -126,13 +135,25 @@ jobs:
           python3 scripts/apply-eglantine-switch2-regressions-tolerant.py upstream | tee regressions.log
           grep NX2_PATCH_SKIP regressions.log | sed 's/^/::warning title=patch-skip::/' || true
 
+      - name: Library ExeFS dedupe by base program ID
+        shell: bash
+        run: python3 scripts/apply-nx2-exefs-dedupe.py upstream
+
+      - name: Keep cached library ExeFS games at startup
+        shell: bash
+        run: python3 scripts/apply-nx2-cached-exefs-games.py upstream
+
+      - name: Launch library ExeFS games from the list
+        shell: bash
+        run: python3 scripts/apply-nx2-exefs-list-launch.py upstream
+
       - name: Enable direct ExeFS Android folder launch
         shell: bash
         run: |
           python3 -m py_compile scripts/apply-nx2-direct-exefs.py
           python3 scripts/apply-nx2-direct-exefs.py upstream
           grep -n 'Launch ExeFS game folder' upstream/src/android/app/src/main/res/values/strings.xml
-          grep -n 'showAddDirectoryMenu(binding.addDirectory)' upstream/src/android/app/src/main/java/org/yuzu/yuzu_emu/ui/GamesFragment.kt
+          grep -n 'showAddDirectoryMenu(binding.addDirectory)' upstream/src/android/app/src/main/java/io/github/zortos293/lichii/ui/GamesFragment.kt
           grep -n 'NX2_LOOSE_ROMFS mode=base+update' upstream/src/core/loader/deconstructed_rom_directory.cpp
 
       - name: Decode prefixed ZBIC NSO frames and add content diagnostics
@@ -175,10 +196,168 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-hang-sample.py upstream
 
+      - name: nx2_switches.txt loader and NX2_GPU load logging
+        shell: bash
+        run: python3 scripts/apply-nx2-switches-and-gpu-stats.py upstream
+
       - name: GPU-thread profiler on (test builds)
         if: github.ref_name != 'main'
         shell: bash
         run: python3 scripts/apply-nx2-gpu-profile-on.py upstream
+
+      - name: Software HMMA through workgroup memory (Turnip)
+        shell: bash
+        run: python3 scripts/apply-nx2-hmma-lds.py upstream
+
+      - name: Software HMMA K=16 loop unrolled (Adreno)
+        shell: bash
+        # Dropped in build 130 when upstream unrolled each K=8 group itself. Since then the GPU
+        # itself is the limit in Donkey Kong Bananza: ~6.5 % busy per frame-per-second (78-90 % at
+        # 12 fps on Dynarmic, build 145) against ~2.2 % on builds 118-127 with this.
+        run: python3 scripts/apply-nx2-hmma-unroll.py upstream
+
+      - name: Terrain layer arrays get memory on Android (Mario Kart World black ground)
+        shell: bash
+        # MKW's three 8192x8192x68 terrain arrays: the two ASTC ones stayed wholly unbacked on
+        # Adreno (only GPU-decoded ASTC got memory by layer), the third was capped at 384 MiB.
+        # Build 148 bound all 68 layers at full size (4.9 GiB) and Android killed the app while
+        # loading; since 149 each array keeps only the mip levels that fit 512 MiB.
+        run: python3 scripts/apply-nx2-android-terrain-layers.py upstream
+
+      - name: Slow Ocarina compute shaders unoptimized on Adreno; log compute builds
+        shell: bash
+        run: python3 scripts/apply-nx2-slow-compile.py upstream
+
+      - name: Skip the DLSS network when the replacement upscale draws
+        shell: bash
+        run: python3 scripts/apply-nx2-dlss-skip-network.py upstream
+
+      - name: Profile GPU waits by call site
+        if: github.ref_name != 'main'
+        shell: bash
+        run: python3 scripts/apply-nx2-finish-sites.py upstream
+
+      - name: Host-mapped buffer cache buffers on Adreno (unified memory)
+        shell: bash
+        run: python3 scripts/apply-nx2-mapped-buffers.py upstream
+
+      - name: Mapped buffer reads wait for the last GPU write
+        shell: bash
+        run: python3 scripts/apply-nx2-download-write-tick.py upstream
+
+      - name: NCE unmapped accesses behave as on Dynarmic
+        shell: bash
+        run: python3 scripts/apply-nce-unmapped-access.py upstream
+
+      - name: Profile host threads and NCE faults (test builds)
+        if: github.ref_name != 'main'
+        shell: bash
+        run: python3 scripts/apply-nx2-thread-cpu.py upstream
+
+      - name: Probe cooperative matrix support (test builds)
+        if: github.ref_name != 'main'
+        shell: bash
+        run: python3 scripts/apply-nx2-coopmat-probe.py upstream
+
+      - name: GPU-written invalidation stats (test builds)
+        if: github.ref_name != 'main'
+        shell: bash
+        run: python3 scripts/apply-nx2-invalidation-stats.py upstream
+
+      - name: NCE collects small writes to GPU-written pages
+        shell: bash
+        run: python3 scripts/apply-nx2-nce-collect-writes.py upstream
+
+      - name: Frame statistics, stop reasons, session summary, ADPF for Switch 2 presents
+        shell: bash
+        run: python3 scripts/apply-nx2-diagnostics.py upstream
+
+      - name: Mesh emulation with per-primitive outputs (Mario Kart World dropped mesh draws)
+        shell: bash
+        run: python3 scripts/apply-nx2-mesh-per-primitive.py upstream
+
+      - name: Frame-threaded movie decoding (Ocarina's choppy title video)
+        shell: bash
+        run: python3 scripts/apply-nx2-video-frame-threads.py upstream
+
+      - name: Keep the previous driver library through the next game's Load (relaunch crash)
+        shell: bash
+        run: python3 scripts/apply-nx2-relaunch-teardown.py upstream
+
+      - name: Turnip without subgroup operations in vertex shaders (Mario Kart World stripes)
+        shell: bash
+        run: python3 scripts/apply-nx2-turnip-vertex-subgroups.py upstream
+
+      - name: Log shaders that load through pointers (NX2_GMEM, Ocarina GPU cost)
+        shell: bash
+        run: python3 scripts/apply-nx2-global-memory-log.py upstream
+
+      - name: Pointer loads read their candidate bases once per invocation (Ocarina GPU cost)
+        shell: bash
+        run: python3 scripts/apply-nx2-gmem-hoist.py upstream
+
+      - name: Driver statistics per pipeline with EDEN_NX2_PIPELINE_STATS=1 (NX2_PSTATS)
+        shell: bash
+        run: python3 scripts/apply-nx2-pipeline-stats.py upstream
+
+      - name: Shader precache and build-all-cached switches (EDEN_NX2_PRECACHE, EDEN_NX2_BUILD_ALL_CACHED)
+        shell: bash
+        run: python3 scripts/apply-nx2-shader-precache.py upstream
+
+      - name: Precache and build-all-cached shaders as settings (global and per game)
+        shell: bash
+        run: python3 scripts/apply-nx2-precache-setting.py upstream
+
+      - name: Shader loading screen shows the step, count and time left
+        shell: bash
+        run: python3 scripts/apply-nx2-shader-progress.py upstream
+
+      - name: Dialog when the game itself aborts (svcBreak) instead of a silent black screen
+        shell: bash
+        run: python3 scripts/apply-nx2-guest-abort-notice.py upstream
+
+      - name: Log host CPU clocks every 10 s (thermal throttling check)
+        shell: bash
+        run: python3 scripts/apply-nx2-cpu-clocks.py upstream
+
+      - name: Memory trace every 10 s and process memory split (Ocarina grew to 17 GB)
+        shell: bash
+        run: python3 scripts/apply-nx2-mem-trace-on.py upstream
+
+      - name: Install NX2 Flight Recorder (rolling frames, event history, crash recovery)
+        shell: bash
+        run: |
+          python3 -m py_compile scripts/apply-nx2-flight-recorder.py
+          python3 scripts/apply-nx2-flight-recorder.py upstream "build-${{ github.run_number }}"
+          grep -q 'object Nx2FlightRecorder' upstream/src/android/app/src/main/java/io/github/zortos293/lichii/utils/Nx2FlightRecorder.kt
+
+      - name: NCE opens pages with GPU-written bytes for writing without waiting
+        shell: bash
+        # A write to such a page waited for the GPU thread (3,300-4,000/s in DKB). Now the page
+        # is copied and opened at once; the GPU thread finds the written bytes by comparison.
+        # In the log, "collected" counts pages opened and "bursts" pages opened again.
+        run: python3 scripts/apply-nx2-nce-open-pages.py upstream
+
+      - name: Zero-size staging buffer guard
+        shell: bash
+        run: python3 scripts/apply-nx2-staging-zero-size.py upstream
+
+      - name: Invalid-format image upload guard
+        shell: bash
+        run: python3 scripts/apply-nx2-invalid-format-upload.py upstream
+
+      - name: Silent Switch 2 microphone on Android
+        shell: bash
+        run: python3 scripts/apply-nx2-silent-mic.py upstream
+
+      - name: Cooperative matrix query guard
+        shell: bash
+        run: python3 scripts/apply-nx2-coopmat-guard.py upstream
+
+      - name: Flush every log line (test builds)
+        if: github.ref_name != 'main'
+        shell: bash
+        run: python3 scripts/apply-nx2-log-flush.py upstream
 
       - name: Detect Android build requirements
         id: android_req
@@ -200,6 +379,13 @@ jobs:
         run: |
           "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "ndk;${{ steps.android_req.outputs.ndk_version }}"
 
+      - name: Build FFmpeg with dav1d (AV1) for Android
+        shell: bash
+        run: |
+          ANDROID_NDK_DIR="$ANDROID_SDK_ROOT/ndk/${{ steps.android_req.outputs.ndk_version }}" \
+            bash scripts/build-android-ffmpeg-av1.sh "$GITHUB_WORKSPACE/ffmpeg-android"
+          python3 scripts/apply-android-ffmpeg-av1.py upstream "$GITHUB_WORKSPACE/ffmpeg-android"
+
       - name: Prepare Gradle
         shell: bash
         working-directory: upstream/src/android
@@ -209,6 +395,14 @@ jobs:
           ./gradlew tasks --all > "$GITHUB_WORKSPACE/gradle-tasks.txt"
           grep -E "assemble.*(Standard|Release|Debug)" "$GITHUB_WORKSPACE/gradle-tasks.txt" | head -n 80 || true
 
+      - name: Cache downloaded dependencies
+        uses: actions/cache@v4
+        with:
+          # GitHub release downloads (Boost, OpenSSL...) sometimes fail for hours (504).
+          path: upstream/.cache/cpm
+          key: cpm-${{ hashFiles('upstream/cpmfile.json', 'upstream/**/cpmfile.json') }}
+          restore-keys: cpm-
+
       - name: Kotlin compile preflight
         shell: bash
         working-directory: upstream/src/android
@@ -216,7 +410,18 @@ jobs:
           set -o pipefail
           # CMake configure stages SDL's Java sources into externals/generated/sdl/java.
           # It is fast compared with the full 1,700+ object native build.
-          ./gradlew 'app:configureCMakeRelWithDebInfo[arm64-v8a]' --stacktrace --no-daemon 2>&1 | tee "$GITHUB_WORKSPACE/android-build.log"
+          # Dependencies come from GitHub release downloads, which sometimes fail for an hour
+          # (502/504). Each configure keeps what it fetched, so retry it with growing pauses.
+          for attempt in 1 2 3 4 5 6 7 8; do
+            if ./gradlew 'app:configureCMakeRelWithDebInfo[arm64-v8a]' --stacktrace --no-daemon 2>&1 | tee "$GITHUB_WORKSPACE/android-build.log"; then
+              break
+            fi
+            if [ "$attempt" = 8 ] || ! grep -qE "cannot compute hash on failed download|Failed to download" "$GITHUB_WORKSPACE/android-build.log"; then
+              exit 1
+            fi
+            echo "Dependency download failed (attempt $attempt); retrying in $((attempt * 60)) s"
+            sleep $((attempt * 60))
+          done
           ./gradlew app:compileMainlineReleaseKotlin --stacktrace --no-daemon 2>&1 | tee -a "$GITHUB_WORKSPACE/android-build.log"
 
       - name: Build standard ARM64 APK
@@ -300,11 +505,62 @@ jobs:
           mkdir -p dist && cp "$apk" "dist/Eden-NX2-Android-lichii-test-${{ github.run_number }}.apk"
           cp build-info.txt dist/
           TAG="lichii-test-${{ github.run_number }}"
-          gh release delete "$TAG" --cleanup-tag --yes -R "$GITHUB_REPOSITORY" 2>/dev/null || true
-          gh release create "$TAG" dist/* -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
-            --prerelease --latest=false \
-            --title "Lichii nx2 test ${{ github.run_number }}" \
-            --notes "Test build on zortos293/Lichii nx2 (${NX2_COMMIT:0:9}) with this fork's patches. Pre-release; main stays on Eglantine. No keys, firmware or games included."
+          # Two builds publishing at once got HTTP 403 from the releases API: retry.
+          # Builds 156 and 158 got "HTTP 403: Resource not accessible by integration" on every
+          # attempt with --target set to this commit (builds whose commit changed this workflow).
+          # From the third attempt on, the tag goes on main instead; the notes name the commit.
+          for attempt in 1 2 3 4 5 6; do
+            gh release delete "$TAG" --cleanup-tag --yes -R "$GITHUB_REPOSITORY" 2>/dev/null || true
+            TARGET="$GITHUB_SHA"
+            if [ "$attempt" -ge 3 ]; then
+              TARGET=main
+            fi
+            if gh release create "$TAG" dist/* -R "$GITHUB_REPOSITORY" --target "$TARGET" \
+                --prerelease --latest=false \
+                --title "Lichii nx2 test ${{ github.run_number }}" \
+                --notes "Test build on zortos293/Lichii nx2 (${NX2_COMMIT:0:9}) with this fork's patches, from commit ${GITHUB_SHA:0:9} of claude/lichii-test. Pre-release. No keys, firmware or games included."; then
+              exit 0
+            fi
+            echo "Publish attempt $attempt failed; retrying in $((attempt * 45)) s"
+            sleep $((attempt * 45))
+          done
+          exit 1
+
+      - name: Publish main release (marked latest, followed by the in-app updater)
+        if: success() && github.ref_name == 'main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          apk="$(find upstream/src/android -type f -name '*.apk' | head -n1)"
+          mkdir -p dist && cp "$apk" "dist/Eden-NX2-Android-build-${{ github.run_number }}.apk"
+          cp build-info.txt dist/
+          TAG="build-${{ github.run_number }}"
+          for attempt in 1 2 3 4 5 6; do
+            gh release delete "$TAG" --cleanup-tag --yes -R "$GITHUB_REPOSITORY" 2>/dev/null || true
+            TARGET="$GITHUB_SHA"
+            if [ "$attempt" -ge 3 ]; then
+              TARGET=main
+            fi
+            if gh release create "$TAG" dist/* -R "$GITHUB_REPOSITORY" --target "$TARGET" \
+                --latest \
+                --title "Eden NX2 Android build ${{ github.run_number }}" \
+                --notes "Main build on zortos293/Lichii nx2 (${NX2_COMMIT:0:9}) with this fork's patches, from commit ${GITHUB_SHA:0:9} of main. Test-only profilers and per-line log flushing are off. No keys, firmware or games included."; then
+              exit 0
+            fi
+            echo "Publish attempt $attempt failed; retrying in $((attempt * 45)) s"
+            sleep $((attempt * 45))
+          done
+          exit 1
+
+      - name: Upload APK as a workflow artifact (fallback if publishing fails)
+        if: success() || failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Eden-NX2-Android-${{ github.run_number }}-apk
+          path: dist/*.apk
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Upload diagnostics
         if: always()

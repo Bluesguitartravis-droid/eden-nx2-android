@@ -17,9 +17,9 @@ shutil.copy2(overlay, dest)
 
 home = src / "java" / "org" / "yuzu" / "yuzu_emu" / "fragments" / "HomeSettingsFragment.kt"
 home_text = home.read_text()
-packer_import = "import org.yuzu.yuzu_emu.features.packer.SnapshotPackerActivity\n"
+packer_import = "import io.github.zortos293.lichii.features.packer.SnapshotPackerActivity\n"
 if packer_import not in home_text:
-    anchor = "import org.yuzu.yuzu_emu.features.settings.model.Settings\n"
+    anchor = "import io.github.zortos293.lichii.features.settings.model.Settings\n"
     if anchor not in home_text:
         raise SystemExit(f"Could not find HomeSettings import anchor in {home}")
     home_text = home_text.replace(anchor, packer_import + anchor, 1)
@@ -48,7 +48,7 @@ home.write_text(home_text)
 manifest = src / "AndroidManifest.xml"
 manifest_text = manifest.read_text()
 activity = '''        <activity
-            android:name="org.yuzu.yuzu_emu.features.packer.SnapshotPackerActivity"
+            android:name="io.github.zortos293.lichii.features.packer.SnapshotPackerActivity"
             android:theme="@style/Theme.Yuzu.Main"
             android:label="@string/snapshot_packer"
             android:exported="false" />
@@ -56,7 +56,7 @@ activity = '''        <activity
 '''
 if "features.packer.SnapshotPackerActivity" not in manifest_text:
     marker = '''        <activity
-            android:name="org.yuzu.yuzu_emu.features.settings.ui.SettingsActivity"
+            android:name="io.github.zortos293.lichii.features.settings.ui.SettingsActivity"
 '''
     if marker not in manifest_text:
         raise SystemExit(f"Could not find manifest insertion point in {manifest}")

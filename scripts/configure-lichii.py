@@ -47,7 +47,13 @@ scm.write_text(s)
 
 net = root / "src/common/net/net.cpp"
 n = net.read_text()
-head = "std::vector<Asset> Release::GetPlatformAssets(std::string_view platform) const {\n"
+heads = [
+    "std::vector<Asset> Release::GetPlatformAssets(std::string_view platform) const {\n",
+    # Newer Lichii (#504): a package argument for Linux AppImage/archive choice.
+    "std::vector<Asset> Release::GetPlatformAssets(std::string_view platform,\n"
+    "                                              LinuxPackage package) const {\n",
+]
+head = next((h for h in heads if h in n), heads[0])
 android = head + '''    if (platform == "android-arm64") {
         // Eden NX2 Android fork: tag build-N ships Eden-NX2-Android-buildN-standard.apk.
         const std::string host_url = "https://github.com";

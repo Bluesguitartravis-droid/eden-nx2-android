@@ -6,12 +6,12 @@ import sys
 if len(sys.argv) != 2:
     raise SystemExit("usage: apply-nx2-direct-exefs.py <upstream-dir>")
 root = Path(sys.argv[1]).resolve()
-games = root / "src/android/app/src/main/java/org/yuzu/yuzu_emu/ui/GamesFragment.kt"
+games = root / "src/android/app/src/main/java/io/github/zortos293/lichii/ui/GamesFragment.kt"
 data = games.read_text()
 for old, new in [
     ("import android.content.Intent\n", "import android.content.Intent\nimport android.net.Uri\nimport android.os.Build\nimport android.os.Environment\nimport android.provider.Settings\n"),
     ("import androidx.core.view.ViewCompat\n", "import androidx.core.net.toUri\nimport androidx.core.view.ViewCompat\n"),
-    ("import org.yuzu.yuzu_emu.model.HomeViewModel\n", "import org.yuzu.yuzu_emu.model.HomeViewModel\nimport org.yuzu.yuzu_emu.utils.GameHelper\nimport org.yuzu.yuzu_emu.utils.PathUtil\n"),
+    ("import io.github.zortos293.lichii.model.HomeViewModel\n", "import io.github.zortos293.lichii.model.HomeViewModel\nimport io.github.zortos293.lichii.utils.GameHelper\nimport io.github.zortos293.lichii.utils.PathUtil\n"),
     ("import java.util.Locale\n", "import java.io.File\nimport java.util.Locale\nimport com.google.android.material.dialog.MaterialAlertDialogBuilder\n"),
 ]:
     if new.strip() not in data:

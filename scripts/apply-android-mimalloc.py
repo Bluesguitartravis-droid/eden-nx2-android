@@ -19,7 +19,7 @@ t = cm.read_text()
 if "nx2_mimalloc" in t:
     print("mimalloc already applied"); sys.exit(0)
 
-(jni / "nx2_mimalloc_new_delete.cpp").write_text("""// Eden NX2 Android: route operator new/delete in libyuzu-android.so to mimalloc.
+(jni / "nx2_mimalloc_new_delete.cpp").write_text("""// Eden NX2 Android: route operator new/delete in liblichii-android.so to mimalloc.
 // libc++ is linked statically and the library uses -Bsymbolic, so these
 // definitions replace libc++'s for every allocation made by the emulator.
 #include <mimalloc-new-delete.h>
@@ -38,14 +38,14 @@ set(MI_BUILD_SHARED OFF CACHE BOOL "" FORCE)
 set(MI_BUILD_STATIC ON CACHE BOOL "" FORCE)
 set(MI_BUILD_OBJECT OFF CACHE BOOL "" FORCE)
 set(MI_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-# libyuzu-android.so is dlopened: initial-exec TLS fails to load on bionic.
+# liblichii-android.so is dlopened: initial-exec TLS fails to load on bionic.
 set(MI_LOCAL_DYNAMIC_TLS ON CACHE BOOL "" FORCE)
 set(MI_INSTALL_TOPLEVEL OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(nx2_mimalloc
     URL https://github.com/microsoft/mimalloc/archive/refs/tags/v2.1.7.tar.gz
 )
 FetchContent_MakeAvailable(nx2_mimalloc)
-target_link_libraries(yuzu-android PRIVATE mimalloc-static)
+target_link_libraries(lichii-android PRIVATE mimalloc-static)
 """
 cm.write_text(t)
-print("mimalloc operator new/delete installed for libyuzu-android")
+print("mimalloc operator new/delete installed for liblichii-android")

@@ -88,3 +88,20 @@ elif trace.exists():
     if "std::atomic<std::shared_ptr" in t:
         raise SystemExit("atomic shared_ptr still used in window_trace.h")
     print("window_trace atomic shared_ptr compat applied")
+
+# Lichii faa4bd13a (video_core/nx2.h semaphore waiters) reads guest words with
+# std::atomic_ref<u32>{word}.load(order): the same load on the __atomic builtin.
+import re
+pattern = re.compile(
+    r"std::atomic_ref<(u32|u64|std::uint32_t|std::uint64_t)>\{([^{}]+)\}\.load\(std::memory_order_(relaxed|acquire|seq_cst)\)")
+for path in sorted((root / "src").rglob("*")):
+    if path.suffix not in (".h", ".cpp") or "tests" in path.parts or "dynarmic" in path.parts:
+        continue
+    text = path.read_text(errors="ignore")
+    if "std::atomic_ref" not in text:
+        continue
+    text = pattern.sub(lambda m: f"__atomic_load_n(&({m.group(2)}), __ATOMIC_{m.group(3).upper()})", text)
+    if "std::atomic_ref" in text:
+        raise SystemExit(f"std::atomic_ref still used in {path}")
+    path.write_text(text)
+    print(f"atomic_ref loads rewritten in {path.relative_to(root)}")

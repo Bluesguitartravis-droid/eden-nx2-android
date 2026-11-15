@@ -23,6 +23,15 @@ def replace_required(file: Path, old: str, new: str, label: str) -> None:
     print(f"Applied: {label}")
 
 
+def replace_optional(file: Path, old: str, new: str, label: str) -> None:
+    """For diagnostics that depend on a block upstream may have reshaped."""
+    data = file.read_text()
+    if old not in data and new not in data:
+        print(f"Skipped: {label} (block not present)")
+        return
+    replace_required(file, old, new, label)
+
+
 # The DKB failure resembles the one in Eglantine issue #335: a base-only RomFS
 # can contain Voice/Voxel/XLink yet lack the updated System/HeapSize and RSDB.
 # Probe the *mounted* (potentially patched) RomFS, not merely an NSP's filename.
@@ -92,7 +101,11 @@ new_open = """VirtualFile RomFSFactory::OpenCurrentProcess(u64 current_process_t
     }
     return mounted;
 }"""
-replace_required(romfs_cpp, old_open, new_open, "DKB effective RomFS mount probe")
+# Old DKB boot diagnostic; newer Lichii reshaped OpenCurrentProcess (LayeredFS for NUPs).
+if old_open in romfs_cpp.read_text() or new_open in romfs_cpp.read_text():
+    replace_required(romfs_cpp, old_open, new_open, "DKB effective RomFS mount probe")
+else:
+    print("Skipped: DKB effective RomFS mount probe (upstream reshaped OpenCurrentProcess)")
 
 # The original NSO loader asserted when LZ4/ZBIC failed, then still copied the
 # decompression buffer into guest code. It also used compressed-size headers to
@@ -110,7 +123,9 @@ if marker not in data:
         raise SystemExit(f"Could not find NSO decode loop in {nso_file}")
     original = data[start:end]
     if "ASSERT(r > 0)" not in original or "ASSERT(r == int(nso_header.segments[i].size))" not in original:
-        raise SystemExit("NSO decode loop shape differs; refusing an unsafe patch")
+        # Newer Lichii fails the NSO load itself when decompression fails (#160).
+        print("Skipped: NSO segment guard (upstream checks decompression itself)")
+        marker = None
     replacement = """    {
         // NX2 guarded NSO segment reads: malformed or unsupported compressed
         // segments must not silently become executable zero-filled memory.
@@ -240,13 +255,15 @@ if marker not in data:
         }
     }
 """
-    data = data[:start] + replacement + data[end:]
-    if "#include <limits>" not in data:
-        data = data.replace("#include <cstring>", "#include <cstring>\n#include <limits>", 1)
-    nso_file.write_text(data)
-    print("Applied: guarded NSO decompression and short-read checks")
+    if marker is not None:
+        data = data[:start] + replacement + data[end:]
+        if "#include <limits>" not in data:
+            data = data.replace("#include <cstring>", "#include <cstring>\n#include <limits>", 1)
+        nso_file.write_text(data)
+        print("Applied: guarded NSO decompression and short-read checks")
 else:
     print("Already applied: guarded NSO decompression and short-read checks")
+nso_guarded = "// NX2 guarded NSO segment reads" in data
 
 # Build 63: the Build 62 log shows 41,000+ unmapped writes when Dynarmic
 # ignores memory aborts. For DKB only, stop at the first invalid access and
@@ -310,7 +327,7 @@ replace_required(
     '#include <string>\n#include "core/file_sys/romfs.h"',
     "RomFS layout diagnostic string include",
 )
-replace_required(
+replace_optional(
     romfs_cpp,
     """        LOG_WARNING(Service_FS,
                     "NX2_ROMFS_PROBE DKB base_bytes={:#x} mounted_bytes={:#x} """,
@@ -362,7 +379,7 @@ nso_probe = """                    if (result != static_cast<int>(decoded_size))
                                   source_offset + source_size, file_size);
                         LOG_ERROR(Loader,
                                   "NSO {} segment {} decompression failed: got={} """""
-if "NX2_NSO_INPUT" not in data:
+if nso_guarded and "NX2_NSO_INPUT" not in data:
     if nso_failure not in data:
         raise SystemExit("Could not find NSO failure logging insertion point")
     data = data.replace(nso_failure, nso_probe, 1)

@@ -526,32 +526,8 @@ jobs:
           done
           exit 1
 
-      - name: Publish main release (marked latest, followed by the in-app updater)
-        if: success() && github.ref_name == 'main'
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          apk="$(find upstream/src/android -type f -name '*.apk' | head -n1)"
-          mkdir -p dist && cp "$apk" "dist/Eden-NX2-Android-build-${{ github.run_number }}.apk"
-          cp build-info.txt dist/
-          TAG="build-${{ github.run_number }}"
-          for attempt in 1 2 3 4 5 6; do
-            gh release delete "$TAG" --cleanup-tag --yes -R "$GITHUB_REPOSITORY" 2>/dev/null || true
-            TARGET="$GITHUB_SHA"
-            if [ "$attempt" -ge 3 ]; then
-              TARGET=main
-            fi
-            if gh release create "$TAG" dist/* -R "$GITHUB_REPOSITORY" --target "$TARGET" \
-                --latest \
-                --title "Eden NX2 Android build ${{ github.run_number }}" \
-                --notes "Main build on zortos293/Lichii nx2 (${NX2_COMMIT:0:9}) with this fork's patches, from commit ${GITHUB_SHA:0:9} of main. Test-only profilers and per-line log flushing are off. No keys, firmware or games included."; then
-              exit 0
-            fi
-            echo "Publish attempt $attempt failed; retrying in $((attempt * 45)) s"
-            sleep $((attempt * 45))
-          done
-          exit 1
+      # Main builds are published by publish-release.yml (build-N, marked latest) from the
+      # eden-nx2-android-arm64-N artifact above.
 
       - name: Upload APK as a workflow artifact (fallback if publishing fails)
         if: success() || failure()

@@ -84,7 +84,7 @@ text = text.replace(anchor, anchor + r'''
             }
         }
 ''', 1)
-for inc in ("#include <mutex>\n", "#include <unordered_set>\n"):
+for inc in ("#include <mutex>\n", "#include <unordered_set>\n", "#include <unordered_map>\n"):
     if inc not in text:
         text = text.replace("#include <algorithm>\n", "#include <algorithm>\n" + inc, 1)
 compute_anchor = ("    auto program{TranslateProgram(pools.inst, pools.block, env, cfg, host_info)};\n"
@@ -95,10 +95,12 @@ text = text.replace(compute_anchor, compute_anchor + r'''    {
         // NX2_COMPUTE: the shape of each compute program (build 164's trace: one Ocarina dispatch
         // of 43x24 groups took 15 ms of a 60-90 ms frame).
         u32 insts{}, gloads{}, shared_ops{}, images{}, warp{};
+        std::unordered_map<Shader::IR::Opcode, u32> nx2_ops;
         for (const auto* block : program.post_order_blocks) {
             for (const auto& inst : block->Instructions()) {
                 ++insts;
                 const auto op{inst.GetOpcode()};
+                ++nx2_ops[op];
                 if (op >= Shader::IR::Opcode::LoadGlobalU8 && op <= Shader::IR::Opcode::LoadGlobal128) {
                     ++gloads;
                 } else if (op >= Shader::IR::Opcode::LoadSharedU8 &&
@@ -118,6 +120,27 @@ text = text.replace(compute_anchor, compute_anchor + r'''    {
                  key.unique_hash, program.workgroup_size[0], program.workgroup_size[1],
                  program.workgroup_size[2], program.shared_memory_size, program.local_memory_size,
                  insts, gloads, shared_ops, images, warp, program.post_order_blocks.size());
+        static std::once_flag nx2_host_once;
+        std::call_once(nx2_host_once, [this] {
+            LOG_INFO(Render_Vulkan, "NX2_COMPUTE host float16={} float64={} int64={}",
+                     host_info.support_float16, host_info.support_float64, host_info.support_int64);
+        });
+        if (insts >= 4000) {
+            // NX2_COMPUTE_OPS: the most frequent IR instructions of a large program (Ocarina's
+            // 14-15k-instruction programs became 41-46k Turnip instructions, about half of
+            // them conversions, build 177).
+            std::vector<std::pair<u32, Shader::IR::Opcode>> nx2_sorted;
+            for (const auto& [op, count] : nx2_ops) {
+                nx2_sorted.emplace_back(count, op);
+            }
+            std::ranges::sort(nx2_sorted, std::greater<>{});
+            std::string nx2_text;
+            for (size_t i = 0; i < nx2_sorted.size() && i < 24; ++i) {
+                nx2_text += fmt::format(" {}={}", Shader::IR::NameOf(nx2_sorted[i].second),
+                                        nx2_sorted[i].first);
+            }
+            LOG_INFO(Render_Vulkan, "NX2_COMPUTE_OPS s6:{:016x}{}", key.unique_hash, nx2_text);
+        }
     }
 ''', 1)
 path.write_text(text)

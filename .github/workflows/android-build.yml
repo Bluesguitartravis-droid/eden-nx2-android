@@ -18,6 +18,7 @@ on:
       - "patches/**"
       - "scripts/**"
       - "android_overlay/**"
+      - "tools/**"
       - "README.md"
       - "docs/**"
 
@@ -338,6 +339,31 @@ jobs:
           python3 -m py_compile scripts/apply-nx2-flight-recorder.py
           python3 scripts/apply-nx2-flight-recorder.py upstream "build-${{ github.run_number }}"
           grep -q 'object Nx2FlightRecorder' upstream/src/android/app/src/main/java/io/github/zortos293/lichii/utils/Nx2FlightRecorder.kt
+
+      - name: Set up Go (Claude Lab tunnel)
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache: false
+
+      - name: Build the Claude Lab tunnel (tools/nx2tunnel, ngrok-go, android/arm64)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd tools/nx2tunnel
+          go mod init github.com/Bluesguitartravis-droid/eden-nx2-android/tools/nx2tunnel
+          go get golang.ngrok.com/ngrok/v2@latest
+          go mod tidy
+          CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o "$RUNNER_TEMP/libnx2tunnel.so" .
+          file "$RUNNER_TEMP/libnx2tunnel.so" || true
+          grep 'golang.ngrok.com/ngrok/v2 ' go.mod
+
+      - name: Install Claude Lab (MCP bridge, Lab screen, restart helper)
+        shell: bash
+        run: |
+          python3 -m py_compile scripts/apply-nx2-claude-bridge.py
+          python3 scripts/apply-nx2-claude-bridge.py upstream "$RUNNER_TEMP/libnx2tunnel.so"
+          test -f upstream/src/android/app/src/main/jniLibs/arm64-v8a/libnx2tunnel.so
 
       - name: NCE opens pages with GPU-written bytes for writing without waiting
         shell: bash

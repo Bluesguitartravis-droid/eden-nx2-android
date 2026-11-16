@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""EDEN_NX2_HMMA_TILE=1: software HMMA through row/column tiles in workgroup memory.
+"""Software HMMA through row/column tiles in workgroup memory (default from build 184;
+EDEN_NX2_HMMA_TILE=0 restores the per-lane gather).
+
+Build 183, Ocarina of Time (Gohma's room, Turnip V39, with EDEN_NX2_HMMA_F16=1): s6:e40f5efb
+13.3 -> 8.8 ms and s6:03bf0ffc 14.2 -> 10.9 ms a dispatch, compute 14.8 -> 10.2 ms and GPU time
+38.1 -> 31.5 ms a frame (medians), no failed pipelines, picture unchanged.
 
 Build 182's EDEN_NX2_HMMA_F16=1 removed the conversions of Ocarina of Time's tensor programs but
 saved only 6-8 % (s6:e40f5efb 13.8 -> 13.0 ms, s6:03bf0ffc 15.4 -> 14.3 ms a dispatch): the
@@ -38,10 +43,10 @@ def rep(old, new):
 
 rep("        if (lds_mode == 2) {\n"
     "            const Id own = ctx.OpIMul(u32ty, add(group_base, lane), imm(6));\n",
-    "        // " + MARK + ": EDEN_NX2_HMMA_TILE=1 (lds_mode 2 only, same workgroup memory).\n"
+    "        // " + MARK + ": on by default, EDEN_NX2_HMMA_TILE=0 turns it off (lds_mode 2 only).\n"
     "        static const bool nx2_tile_switch = [] {\n"
     "            const char* v = std::getenv(\"EDEN_NX2_HMMA_TILE\");\n"
-    "            return v && v[0] == '1';\n"
+    "            return !(v && v[0] == '0');\n"
     "        }();\n"
     "        const bool nx2_tile = nx2_tile_switch && lds_mode == 2;\n"
     "        if (nx2_tile) {\n"

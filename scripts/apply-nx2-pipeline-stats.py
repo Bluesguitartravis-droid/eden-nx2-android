@@ -64,8 +64,30 @@ inline bool Nx2GraphicsPipelineStatsEnabled() {
     return Nx2PipelineStatsLevel() > 1;
 }
 
+/// EDEN_NX2_PSTATS_HASH=<hex prefix>: statistics for the graphics pipelines with a stage whose
+/// hash starts with it (only those are rebuilt), whatever EDEN_NX2_PIPELINE_STATS says.
+template <typename Hashes>
+inline bool Nx2GraphicsPipelineStatsFor(const Hashes& hashes) {
+    if (Nx2GraphicsPipelineStatsEnabled()) {
+        return true;
+    }
+    static const std::string prefix{[] {
+        const char* const value{std::getenv("EDEN_NX2_PSTATS_HASH")};
+        return value != nullptr ? std::string{value} : std::string{};
+    }()};
+    if (prefix.empty()) {
+        return false;
+    }
+    for (const auto hash : hashes) {
+        if (hash != 0 && fmt::format("{:016x}", hash).starts_with(prefix)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 inline void Nx2LogPipelineStats(const Device& device, VkPipeline pipeline, std::string_view label) {
-    if (!Nx2PipelineStatsEnabled() || !device.IsKhrPipelineExecutablePropertiesEnabled() ||
+    if (!device.IsKhrPipelineExecutablePropertiesEnabled() ||
         pipeline == VK_NULL_HANDLE) {
         return;
     }
@@ -134,7 +156,8 @@ patch(root / "vulkan_common/vulkan_device.cpp", [(
     "    // VK_KHR_pipeline_executable_properties (also for EDEN_NX2_PIPELINE_STATS=1, NX2_PSTATS)\n"
     "    if (Settings::values.renderer_shader_feedback.GetValue() || [] {\n"
     "            const char* const value{std::getenv(\"EDEN_NX2_PIPELINE_STATS\")};\n"
-    "            return value != nullptr && (value[0] == '1' || value[0] == '2');\n"
+    "            return (value != nullptr && (value[0] == '1' || value[0] == '2')) ||\n"
+    "                   std::getenv(\"EDEN_NX2_PSTATS_HASH\") != nullptr;\n"
     "        }()) {\n",
 )], include_after=("#include <algorithm>\n", "#include <cstdlib>\n"))
 
@@ -167,14 +190,15 @@ patch(vk / "vk_graphics_pipeline.cpp", [
         "    VkPipelineCreateFlags flags{};\n"
         "    if (device.IsKhrPipelineExecutablePropertiesEnabled() && Settings::values.renderer_debug.GetValue()) {\n",
         "    VkPipelineCreateFlags flags{};\n"
-        "    if (device.IsKhrPipelineExecutablePropertiesEnabled() && Nx2GraphicsPipelineStatsEnabled()) {\n"
+        "    if (device.IsKhrPipelineExecutablePropertiesEnabled() &&\n"
+        "        Nx2GraphicsPipelineStatsFor(key.unique_hashes)) {\n"
         "        flags |= VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR; // NX2_PSTATS\n"
         "    }\n"
         "    if (device.IsKhrPipelineExecutablePropertiesEnabled() && Settings::values.renderer_debug.GetValue()) {\n",
     ),
     (
         "    TracePipelineBuild(\"END\", \"graphics\", key.Hash(), key.unique_hashes, unoptimized,\n",
-        "    if (Nx2GraphicsPipelineStatsEnabled()) {\n"
+        "    if (Nx2GraphicsPipelineStatsFor(key.unique_hashes)) {\n"
         "        std::string nx2_label{fmt::format(\"graphics {:016x}\", key.Hash())};\n"
         "        for (size_t nx2_stage = 0; nx2_stage < key.unique_hashes.size(); ++nx2_stage) {\n"
         "            if (key.unique_hashes[nx2_stage] != 0) {\n"

@@ -216,6 +216,14 @@ jobs:
         # 12 fps on Dynarmic, build 145) against ~2.2 % on builds 118-127 with this.
         run: python3 scripts/apply-nx2-hmma-unroll.py upstream
 
+      - name: Software HMMA in native fp16 with EDEN_NX2_HMMA_F16=1 (Ocarina's tensor programs)
+        shell: bash
+        run: python3 scripts/apply-nx2-hmma-f16.py upstream
+
+      - name: Software HMMA through row/column tiles with EDEN_NX2_HMMA_TILE=1
+        shell: bash
+        run: python3 scripts/apply-nx2-hmma-tile.py upstream
+
       - name: Terrain layer arrays get memory on Android (Mario Kart World black ground)
         shell: bash
         # MKW's three 8192x8192x68 terrain arrays: the two ASTC ones stayed wholly unbacked on

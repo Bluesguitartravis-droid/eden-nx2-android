@@ -19,6 +19,7 @@ Turnip reports registers, waves per core, spills/fills, NOPs and stall cycles; Q
 reports what it reports. Off by default (statistics capture can slow pipeline builds). Pipelines
 loaded from the driver's cache may come without statistics: the line then says so.
 First built in build 170; compute-only =1 and the log head from build 172.
+EDEN_NX2_PSTATS_HASH from build 185.
 Usage: python3 scripts/apply-nx2-pipeline-stats.py <upstream-root>
 """
 from pathlib import Path

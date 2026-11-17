@@ -228,6 +228,8 @@ object Nx2FlightRecorder {
 
     fun buildTag(): String = NX2_BUILD
 
+    fun bridgeSessionDir(): File? = currentSession
+
     fun resume(activity: Activity) {
         activityRef = WeakReference(activity)
         event("activity_resumed")

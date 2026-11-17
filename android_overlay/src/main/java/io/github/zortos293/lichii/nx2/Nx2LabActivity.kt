@@ -98,6 +98,15 @@ class Nx2LabActivity : Activity() {
         })
         status = text("", 14f)
         column.addView(status)
+        column.addView(Switch(this).apply {
+            text = "Show Claude in game (messages, and a C button to mark moments)"
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+            isChecked = Nx2Overlay.isShown(this@Nx2LabActivity)
+            setOnCheckedChangeListener { _, on -> Nx2Overlay.setShown(this@Nx2LabActivity, on) }
+            setPadding(0, dp(4), 0, dp(8))
+        })
+        column.addView(text("In game, tap the small C in the top corner when you see something " +
+            "wrong; hold it to add a note. Claude can then look at that moment.", 13f))
 
         column.addView(text("3. Add it to Claude (once)", 18f, true))
         column.addView(text("Open claude.ai in your browser (the connector setting may not be in " +

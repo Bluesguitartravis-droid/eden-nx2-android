@@ -78,6 +78,9 @@ object Nx2Bridge {
     @Volatile var requestCount = 0
         private set
 
+    /** Frame statistics since the last call (NX2 Claude Lab window in nx2_session.h). */
+    @JvmStatic external fun nativeLiveFrames(): String
+
     private fun prefs(): SharedPreferences = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     /** True in the restart helper's process (":nx2restart"), where the app must not start up. */
@@ -140,12 +143,14 @@ object Nx2Bridge {
             android.util.Log.w(TAG, "Bridge could not start", error)
             server = null
         }
+        Nx2LabService.start(app)
         Nx2Tunnel.start(app, ngrokToken(), PORT)
     }
 
     @Synchronized
     private fun stop() {
         Nx2Tunnel.stop()
+        Nx2LabService.stop(app)
         runCatching { server?.close() }
         server = null
     }
@@ -411,6 +416,26 @@ internal object Nx2Tools {
             "left|right, x?, y?, hold_ms?, wait_ms?}. At most 60 s in total.",
             schema(JSONObject().put("steps", JSONObject().put("type", "array")
                 .put("items", JSONObject().put("type", "object"))), listOf("steps")), false))
+        .put(tool("show_message", "Show a short message on the game screen for a few seconds " +
+            "(needs \"Show Claude in game\" on in Claude Lab).",
+            schema(JSONObject()
+                .put("text", prop("string", "The message, one or two short lines"))
+                .put("seconds", prop("integer", "How long, default 6, 2..60")),
+                listOf("text")), false))
+        .put(tool("watch", "Watch the game for up to 50 s: frame rate, frame times, GPU load and " +
+            "shader building every second, pictures of hitches or drops (up to two), marks the " +
+            "player made meanwhile, and a screenshot at the end. Call it again and again to keep " +
+            "watching while the player plays.",
+            schema(JSONObject()
+                .put("seconds", prop("integer", "5..50, default 30"))
+                .put("screenshot", prop("boolean", "Screenshot at the end, default true"))), true))
+        .put(tool("recent_frames", "The game frames Eden saved in the last half minute (one every " +
+            "2.5 s, 480x270), newest first, with their age. For \"what just happened\".",
+            schema(JSONObject().put("count", prop("integer", "How many, default 4, at most 12"))), true))
+        .put(tool("list_marks", "Moments the player marked with the C button in game (newest " +
+            "first): id, time, note.", schema(), true))
+        .put(tool("get_mark", "A marked moment's full-size screenshot and note.",
+            schema(JSONObject().put("id", prop("string", "Mark id from list_marks")), listOf("id")), true))
         .put(tool("notebook_read", "The lab notebook kept on the device between sessions.", schema(), true))
         .put(tool("notebook_append", "Add a dated entry to the lab notebook (findings, measurements, " +
             "suggestions for code changes).",
@@ -438,6 +463,12 @@ internal object Nx2Tools {
             "move_stick" -> text(moveStick(args.getString("stick"), args.getDouble("x"),
                 args.getDouble("y"), args.optLong("hold_ms", 500)))
             "input_sequence" -> text(sequence(args.getJSONArray("steps")))
+            "show_message" -> text(if (Nx2Overlay.showMessage(args.getString("text"), args.optInt("seconds", 6)))
+                "Shown" else "Not shown: no game on screen, or \"Show Claude in game\" is off")
+            "watch" -> watch(context, args.optInt("seconds", 30).coerceIn(5, 50), args.optBoolean("screenshot", true))
+            "recent_frames" -> recentFrames(args.optInt("count", 4).coerceIn(1, 12))
+            "list_marks" -> text(listMarks(context))
+            "get_mark" -> getMark(context, args.getString("id"))
             "notebook_read" -> text(notebook(context).let { if (it.isFile) it.readText() else "(empty)" })
             "notebook_append" -> text(notebookAppend(context, args.getString("text")))
             else -> error("Unknown tool $name")
@@ -759,40 +790,114 @@ internal object Nx2Tools {
 
     private val captureThread by lazy { HandlerThread("NX2-Bridge-Capture").also { it.start() } }
 
-    private fun screenshot(width: Int): JSONObject {
+    /** The game's picture as MCP image content, or the reason there is none. */
+    private fun capture(width: Int): Pair<JSONObject?, String?> {
         val view = Nx2FlightRecorder.bridgeSurface()
-        val activity = Nx2FlightRecorder.bridgeActivity()
-        val srcW: Int
-        val srcH: Int
-        if (view != null && view.holder.surface.isValid && view.width > 0) {
-            srcW = view.width; srcH = view.height
-        } else if (activity != null) {
-            srcW = activity.window.decorView.width; srcH = activity.window.decorView.height
-        } else return error("No game screen to capture (start a game first)")
-        if (srcW <= 0 || srcH <= 0) return error("Screen has no size yet")
-        val height = (width.toLong() * srcH / srcW).toInt().coerceAtLeast(1)
+            ?: return null to "No game screen: no game has been started."
+        if (!view.holder.surface.isValid || view.width <= 0 || view.height <= 0) {
+            return null to "The game screen is not visible right now (Eden is in the background, " +
+                "e.g. the player is in this chat). Ask them to switch back to Eden."
+        }
+        val height = (width.toLong() * view.height / view.width).toInt().coerceAtLeast(1)
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-        val result = AtomicReference<Int>(-1)
+        val result = AtomicReference(-1)
         val done = CountDownLatch(1)
-        val handler = Handler(captureThread.looper)
-        val listener = PixelCopy.OnPixelCopyFinishedListener { code -> result.set(code); done.countDown() }
         try {
-            if (view != null && view.holder.surface.isValid) PixelCopy.request(view, bitmap, listener, handler)
-            else PixelCopy.request(activity!!.window, bitmap, listener, handler)
+            PixelCopy.request(view, bitmap, { code -> result.set(code); done.countDown() },
+                Handler(captureThread.looper))
         } catch (failure: Exception) {
             bitmap.recycle()
-            return error("Capture failed: $failure")
+            return null to "Capture failed: $failure"
         }
         if (!done.await(5, TimeUnit.SECONDS) || result.get() != PixelCopy.SUCCESS) {
             bitmap.recycle()
-            return error("Capture failed (code ${result.get()})")
+            return null to "Capture failed (code ${result.get()})"
         }
         val out = ByteArrayOutputStream()
         bitmap.compress(Bitmap.CompressFormat.JPEG, 80, out)
         bitmap.recycle()
-        val data = Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
-        return JSONObject().put("content", JSONArray()
-            .put(JSONObject().put("type", "image").put("data", data).put("mimeType", "image/jpeg")))
+        return JSONObject().put("type", "image").put("mimeType", "image/jpeg")
+            .put("data", Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)) to null
+    }
+
+    private fun screenshot(width: Int): JSONObject {
+        val (picture, problem) = capture(width)
+        return if (picture != null) JSONObject().put("content", JSONArray().put(picture))
+        else error(problem ?: "Capture failed")
+    }
+
+    // ---- watch: second-by-second while the player plays -----------------------------------
+
+    private val fpsRe = Regex("^([\\d.]+) fps")
+    private val maxRe = Regex("max (\\d+)")
+    private val p50Re = Regex("p50 (\\d+)")
+
+    private fun watch(context: Context, seconds: Int, withScreenshot: Boolean): JSONObject {
+        if (!running()) return error("No game running")
+        runCatching { Nx2Bridge.nativeLiveFrames() } // start a fresh window
+        val marksBefore = Nx2Overlay.marksDir(context).list()?.toSet() ?: emptySet()
+        val content = JSONArray()
+        val timeline = StringBuilder("sec  fps   p50ms maxms  gpu%  shaders\n")
+        val fpsSeen = ArrayList<Double>()
+        var worstMs = 0
+        var shaderSeconds = 0
+        var anomalyPictures = 0
+        var silent = 0
+        for (second in 1..seconds) {
+            Thread.sleep(1000)
+            val frames = runCatching { Nx2Bridge.nativeLiveFrames() }.getOrDefault("")
+            val fps = fpsRe.find(frames)?.groupValues?.get(1)?.toDoubleOrNull() ?: 0.0
+            val maxMs = maxRe.find(frames)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+            val p50 = p50Re.find(frames)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+            val gpu = readSys("/sys/class/kgsl/kgsl-3d0/gpu_busy_percentage")?.substringBefore(' ') ?: "?"
+            val shaders = runCatching { NativeLibrary.getShadersBuilding() }.getOrDefault(0)
+            if (frames.isEmpty()) silent++
+            if (shaders > 0) shaderSeconds++
+            timeline.append(String.format(Locale.US, "%3d %5.1f %6d %5d %5s %8d\n", second, fps, p50, maxMs, gpu, shaders))
+            val typical = fpsSeen.sorted().let { if (it.isEmpty()) 0.0 else it[it.size / 2] }
+            val hitch = maxMs > 0 && p50 > 0 && maxMs >= 3 * p50 && maxMs >= 50
+            val drop = typical > 0 && fps > 0 && fps < typical * 0.7
+            if ((hitch || drop) && anomalyPictures < 2) {
+                capture(640).first?.let { picture ->
+                    anomalyPictures++
+                    content.put(JSONObject().put("type", "text").put("text",
+                        "Second $second: " + (if (hitch) "hitch, a $maxMs ms frame" else "drop to ${"%.1f".format(fps)} fps") +
+                            (if (shaders > 0) " while $shaders shaders were building" else "")))
+                    content.put(picture)
+                }
+            }
+            if (fps > 0) fpsSeen.add(fps)
+            worstMs = maxOf(worstMs, maxMs)
+        }
+        val sorted = fpsSeen.sorted()
+        val summary = StringBuilder()
+        summary.append("Watched $seconds s. ")
+        if (sorted.isEmpty()) summary.append("No frames presented (paused, loading or in the background). ")
+        else summary.append(String.format(Locale.US, "fps median %.1f, lowest %.1f; worst frame %d ms; ",
+            sorted[sorted.size / 2], sorted.first(), worstMs))
+        summary.append("shaders building in $shaderSeconds s; no frames in $silent s.\n")
+        val memory = Debug.MemoryInfo().also { Debug.getMemoryInfo(it) }
+        summary.append("memory ${memory.totalPss / 1024} MiB")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            summary.append(", thermal status ")
+                .append(context.getSystemService(PowerManager::class.java)?.currentThermalStatus ?: -1)
+        }
+        summary.append(", gpu temp ").append(readSys("/sys/class/kgsl/kgsl-3d0/temp") ?: "?").append('\n')
+        val newMarks = (Nx2Overlay.marksDir(context).list()?.toSet() ?: emptySet()) - marksBefore
+        if (newMarks.isNotEmpty()) {
+            summary.append("The player marked ${newMarks.count { it.endsWith(".json") }} moment(s): ")
+                .append(newMarks.filter { it.endsWith(".json") }.joinToString { it.removeSuffix(".json") })
+                .append(" (get_mark)\n")
+        }
+        val ordered = JSONArray().put(JSONObject().put("type", "text").put("text", summary.toString() + timeline))
+        for (i in 0 until content.length()) ordered.put(content.get(i))
+        val result = ordered
+        if (withScreenshot) {
+            val (picture, problem) = capture(960)
+            if (picture != null) result.put(picture)
+            else result.put(JSONObject().put("type", "text").put("text", "No final screenshot: $problem"))
+        }
+        return JSONObject().put("content", result)
     }
 
     // ---- input ------------------------------------------------------------------------------
@@ -906,6 +1011,52 @@ internal object Nx2Tools {
             }
         }
         return "Ran ${steps.length()} steps (${total} ms)"
+    }
+
+    // ---- recent frames and marks ------------------------------------------------------------
+
+    private fun image(file: File, mime: String): JSONObject = JSONObject().put("type", "image")
+        .put("data", Base64.encodeToString(file.readBytes(), Base64.NO_WRAP)).put("mimeType", mime)
+
+    private fun recentFrames(count: Int): JSONObject {
+        val dir = Nx2FlightRecorder.bridgeSessionDir()?.let { File(it, "frames") }
+            ?: return error("No game session yet")
+        val frames = dir.listFiles()?.filter { it.isFile && it.name.endsWith(".webp") }
+            ?.sortedByDescending { it.lastModified() }?.take(count) ?: emptyList()
+        if (frames.isEmpty()) return error("No saved frames yet (they are saved while the game is on screen)")
+        val now = System.currentTimeMillis()
+        val content = JSONArray()
+        for (frame in frames) {
+            content.put(JSONObject().put("type", "text").put("text",
+                "${(now - frame.lastModified()) / 1000} s ago (${frame.name})"))
+            content.put(image(frame, "image/webp"))
+        }
+        return JSONObject().put("content", content)
+    }
+
+    private fun listMarks(context: Context): String {
+        val files = Nx2Overlay.marksDir(context).listFiles()?.filter { it.name.endsWith(".json") }
+            ?.sortedByDescending { it.name } ?: emptyList()
+        if (files.isEmpty()) return "No marks yet. In game, tap the C button (long-press to add a note)."
+        val now = System.currentTimeMillis()
+        return files.joinToString("\n") { file ->
+            val meta = runCatching { JSONObject(file.readText()) }.getOrNull() ?: JSONObject()
+            val age = (now - meta.optLong("wall_ms", now)) / 1000
+            "${meta.optString("id")}  ${age} s ago  ${meta.optString("build")}  " +
+                (if (File(file.parentFile, file.name.removeSuffix(".json") + ".jpg").isFile) "picture" else "no picture") +
+                "  ${meta.optString("note", "")}"
+        }
+    }
+
+    private fun getMark(context: Context, id: String): JSONObject {
+        if (!Regex("[0-9-]{8,20}").matches(id)) return error("Bad mark id")
+        val dir = Nx2Overlay.marksDir(context)
+        val meta = File(dir, "$id.json")
+        if (!meta.isFile) return error("No mark $id (see list_marks)")
+        val content = JSONArray().put(JSONObject().put("type", "text").put("text", meta.readText()))
+        val picture = File(dir, "$id.jpg")
+        if (picture.isFile) content.put(image(picture, "image/jpeg"))
+        return JSONObject().put("content", content)
     }
 
     // ---- notebook ---------------------------------------------------------------------------

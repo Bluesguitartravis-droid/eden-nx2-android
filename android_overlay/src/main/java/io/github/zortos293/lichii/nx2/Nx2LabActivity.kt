@@ -29,6 +29,8 @@ class Nx2LabActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var address: TextView
     private lateinit var copy: Button
+    private lateinit var markButton: Button
+    private var waitingForKey = false
     private val refresher = object : Runnable {
         override fun run() {
             refresh()
@@ -107,6 +109,10 @@ class Nx2LabActivity : Activity() {
         })
         column.addView(text("In game, tap the small C in the top corner when you see something " +
             "wrong; hold it to add a note. Claude can then look at that moment.", 13f))
+        markButton = Button(this).apply {
+            setOnClickListener { chooseMarkKey() }
+        }
+        column.addView(markButton)
 
         column.addView(text("3. Add it to Claude (once)", 18f, true))
         column.addView(text("Open claude.ai in your browser (the connector setting may not be in " +
@@ -157,7 +163,38 @@ class Nx2LabActivity : Activity() {
         })
     }
 
+    private fun chooseMarkKey() {
+        if (Nx2Overlay.markKey(this) != 0) {
+            Nx2Overlay.setMarkKey(this, 0)
+            refresh()
+            return
+        }
+        waitingForKey = true
+        markButton.text = "Press the button to use now (e.g. a back button)…"
+    }
+
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        if (waitingForKey && event.action == android.view.KeyEvent.ACTION_DOWN &&
+            event.keyCode != android.view.KeyEvent.KEYCODE_BACK
+        ) {
+            waitingForKey = false
+            Nx2Overlay.setMarkKey(this, event.keyCode)
+            Toast.makeText(this, "Mark button set: " +
+                android.view.KeyEvent.keyCodeToString(event.keyCode).removePrefix("KEYCODE_"),
+                Toast.LENGTH_SHORT).show()
+            refresh()
+            return true
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
     private fun refresh() {
+        if (!waitingForKey) {
+            val code = Nx2Overlay.markKey(this)
+            markButton.text = if (code == 0) "Mark with a controller button: choose…"
+            else "Mark button: " + android.view.KeyEvent.keyCodeToString(code).removePrefix("KEYCODE_") +
+                " (tap to remove)"
+        }
         val on = Nx2Bridge.isEnabled()
         val url = Nx2Bridge.connectorUrl()
         status.text = when {

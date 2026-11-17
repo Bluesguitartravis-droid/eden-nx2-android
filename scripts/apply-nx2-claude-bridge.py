@@ -173,4 +173,11 @@ if MARK not in text:
                      "-keep class io.github.zortos293.lichii.nx2.Nx2Bridge { native <methods>; }\n")
     print("patched: proguard-rules.pro")
 
+patch("java/io/github/zortos293/lichii/activities/EmulationActivity.kt",
+      "    override fun dispatchKeyEvent(event: KeyEvent): Boolean {\n",
+      "    override fun dispatchKeyEvent(event: KeyEvent): Boolean {\n"
+      "        // " + MARK + ": the mark button chosen in Claude Lab.\n"
+      "        if (io.github.zortos293.lichii.nx2.Nx2Overlay.onKey(this, event)) return true\n",
+      mark="Nx2Overlay.onKey(this, event)")
+
 print("Claude Lab installed")

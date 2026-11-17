@@ -429,6 +429,9 @@ internal object Nx2Tools {
             schema(JSONObject()
                 .put("seconds", prop("integer", "5..50, default 30"))
                 .put("screenshot", prop("boolean", "Screenshot at the end, default true"))), true))
+        .put(tool("last_exit", "How Eden's previous runs ended, as Android recorded it (low " +
+            "memory, crash, user closed it, ...), with memory use at the time.",
+            schema(JSONObject().put("count", prop("integer", "How many, default 3"))), true))
         .put(tool("recent_frames", "The game frames Eden saved in the last half minute (one every " +
             "2.5 s, 480x270), newest first, with their age. For \"what just happened\".",
             schema(JSONObject().put("count", prop("integer", "How many, default 4, at most 12"))), true))
@@ -466,6 +469,7 @@ internal object Nx2Tools {
             "show_message" -> text(if (Nx2Overlay.showMessage(args.getString("text"), args.optInt("seconds", 6)))
                 "Shown" else "Not shown: no game on screen, or \"Show Claude in game\" is off")
             "watch" -> watch(context, args.optInt("seconds", 30).coerceIn(5, 50), args.optBoolean("screenshot", true))
+            "last_exit" -> text(lastExit(context, args.optInt("count", 3).coerceIn(1, 10)))
             "recent_frames" -> recentFrames(args.optInt("count", 4).coerceIn(1, 12))
             "list_marks" -> text(listMarks(context))
             "get_mark" -> getMark(context, args.getString("id"))
@@ -1011,6 +1015,26 @@ internal object Nx2Tools {
             }
         }
         return "Ran ${steps.length()} steps (${total} ms)"
+    }
+
+    private fun lastExit(context: Context, count: Int): String {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return "Needs Android 11"
+        val manager = context.getSystemService(ActivityManager::class.java)
+        val reasons = manager.getHistoricalProcessExitReasons(context.packageName, 0, count + 4)
+            .filter { !it.processName.endsWith(":nx2restart") }.take(count)
+        if (reasons.isEmpty()) return "Android has no record of earlier runs"
+        val names = mapOf(0 to "unknown", 1 to "exit (the app ended itself)", 2 to "signaled",
+            3 to "LOW MEMORY (Android closed it for memory)", 4 to "CRASH (Java)", 5 to "CRASH (native)",
+            6 to "not responding (ANR)", 7 to "initialization failure", 8 to "permission change",
+            9 to "excessive resource use", 10 to "user requested (closed from recents)",
+            11 to "user stopped", 12 to "dependency died", 13 to "other", 14 to "frozen",
+            15 to "package state change", 16 to "package updated")
+        val format = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
+        return reasons.joinToString("\n") { info ->
+            "${format.format(java.util.Date(info.timestamp))}  ${names[info.reason] ?: info.reason}" +
+                "  pss=${info.pss / 1024} MiB rss=${info.rss / 1024} MiB importance=${info.importance}" +
+                (info.description?.let { "  ($it)" } ?: "")
+        }
     }
 
     // ---- recent frames and marks ------------------------------------------------------------

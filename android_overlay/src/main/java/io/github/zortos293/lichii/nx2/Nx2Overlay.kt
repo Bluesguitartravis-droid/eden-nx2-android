@@ -35,6 +35,7 @@ import java.util.Locale
 object Nx2Overlay {
     private const val PREFS = "nx2_bridge"
     private const val KEY_SHOW = "show_in_game"
+    private const val KEY_MARK_KEY = "mark_keycode"
     private val main = Handler(Looper.getMainLooper())
     private var layerRef: WeakReference<FrameLayout>? = null
     private var bubbleRef: WeakReference<TextView>? = null
@@ -47,6 +48,26 @@ object Nx2Overlay {
     fun setShown(context: Context, shown: Boolean) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_SHOW, shown).apply()
         main.post { layerRef?.get()?.visibility = if (shown && Nx2Bridge.isEnabled()) View.VISIBLE else View.GONE }
+    }
+
+    fun markKey(context: Context): Int =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_MARK_KEY, 0)
+
+    fun setMarkKey(context: Context, keyCode: Int) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putInt(KEY_MARK_KEY, keyCode).apply()
+    }
+
+    /**
+     * EmulationActivity.dispatchKeyEvent (patched): the button chosen in Claude Lab marks the
+     * moment, and the game never sees it. True when the event was used.
+     */
+    fun onKey(activity: Activity, event: android.view.KeyEvent): Boolean {
+        val code = markKey(activity)
+        if (code == 0 || event.keyCode != code || !Nx2Bridge.isEnabled()) return false
+        if (event.action == android.view.KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+            main.post { mark(activity, null) }
+        }
+        return true
     }
 
     private fun dp(context: Context, value: Int) = TypedValue.applyDimension(

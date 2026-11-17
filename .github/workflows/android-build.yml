@@ -185,6 +185,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-android-mimalloc.py upstream
 
+      - name: Name mimalloc memory for memory_breakdown
+        shell: bash
+        run: python3 scripts/apply-android-mimalloc-names.py upstream
+
       - name: Fastmem mapping diagnostics (NX2_HOSTMEM)
         shell: bash
         run: python3 scripts/apply-nx2-hostmem-diag.py upstream

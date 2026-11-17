@@ -429,6 +429,10 @@ internal object Nx2Tools {
             schema(JSONObject()
                 .put("seconds", prop("integer", "5..50, default 30"))
                 .put("screenshot", prop("boolean", "Screenshot at the end, default true"))), true))
+        .put(tool("memory_breakdown", "Where Eden's memory is: /proc/self/smaps grouped by " +
+            "mapping (native heap, guest memory, GPU, Java, code...), resident and private MiB, plus " +
+            "the native heap and Java heap totals. Takes about a second.",
+            schema(JSONObject().put("top", prop("integer", "How many groups, default 25"))), true))
         .put(tool("last_exit", "How Eden's previous runs ended, as Android recorded it (low " +
             "memory, crash, user closed it, ...), with memory use at the time.",
             schema(JSONObject().put("count", prop("integer", "How many, default 3"))), true))
@@ -469,6 +473,7 @@ internal object Nx2Tools {
             "show_message" -> text(if (Nx2Overlay.showMessage(args.getString("text"), args.optInt("seconds", 6)))
                 "Shown" else "Not shown: no game on screen, or \"Show Claude in game\" is off")
             "watch" -> watch(context, args.optInt("seconds", 30).coerceIn(5, 50), args.optBoolean("screenshot", true))
+            "memory_breakdown" -> text(memoryBreakdown(args.optInt("top", 25).coerceIn(5, 80)))
             "last_exit" -> text(lastExit(context, args.optInt("count", 3).coerceIn(1, 10)))
             "recent_frames" -> recentFrames(args.optInt("count", 4).coerceIn(1, 12))
             "list_marks" -> text(listMarks(context))
@@ -1015,6 +1020,72 @@ internal object Nx2Tools {
             }
         }
         return "Ran ${steps.length()} steps (${total} ms)"
+    }
+
+    /** Mapping name with numbers and addresses folded, so e.g. 900 "[anon:scudo:primary]" pieces add up. */
+    private fun groupName(name: String): String {
+        if (name.isEmpty()) return "[anonymous, unnamed]"
+        val trimmed = name.substringBefore(" (deleted)")
+        return when {
+            trimmed.startsWith("/") -> {
+                val base = trimmed.substringAfterLast('/')
+                if (trimmed.contains("/data/app/") || trimmed.endsWith(".so")) "file: $base"
+                else "file: " + trimmed.replace(Regex("[0-9]{3,}"), "#")
+            }
+            else -> trimmed.replace(Regex("[0-9a-fx]{6,}"), "#").replace(Regex("[0-9]+"), "#")
+        }
+    }
+
+    private class MemGroup(var rss: Long = 0, var pss: Long = 0, var priv: Long = 0, var swap: Long = 0,
+                           var size: Long = 0, var count: Int = 0)
+
+    private fun memoryBreakdown(top: Int): String {
+        val groups = HashMap<String, MemGroup>()
+        var current: MemGroup? = null
+        val header = Regex("^[0-9a-f]+-[0-9a-f]+ \\S+ \\S+ \\S+ \\S+\\s*(.*)$")
+        java.io.BufferedReader(java.io.FileReader("/proc/self/smaps"), 1 shl 16).use { reader ->
+            while (true) {
+                val line = reader.readLine() ?: break
+                val first = line.firstOrNull() ?: continue
+                if (first.isDigit() || first in 'a'..'f') {
+                    val m = header.find(line)
+                    if (m != null) {
+                        current = groups.getOrPut(groupName(m.groupValues[1].trim())) { MemGroup() }
+                        current!!.count++
+                        continue
+                    }
+                }
+                val group = current ?: continue
+                val colon = line.indexOf(':')
+                if (colon <= 0) continue
+                val key = line.substring(0, colon)
+                if (key != "Size" && key != "Rss" && key != "Pss" && key != "Private_Dirty" &&
+                    key != "Private_Clean" && key != "Swap") continue
+                val kb = line.substring(colon + 1).trim().substringBefore(' ').toLongOrNull() ?: continue
+                when (key) {
+                    "Size" -> group.size += kb
+                    "Rss" -> group.rss += kb
+                    "Pss" -> group.pss += kb
+                    "Private_Dirty", "Private_Clean" -> group.priv += kb
+                    "Swap" -> group.swap += kb
+                }
+            }
+        }
+        val total = MemGroup()
+        groups.values.forEach { total.rss += it.rss; total.pss += it.pss; total.priv += it.priv; total.swap += it.swap }
+        val out = StringBuilder()
+        out.append(String.format(Locale.US, "total: rss %d MiB, pss %d MiB, private %d MiB, swap %d MiB, %d groups\n",
+            total.rss / 1024, total.pss / 1024, total.priv / 1024, total.swap / 1024, groups.size))
+        out.append(String.format(Locale.US, "native heap allocated %d MiB, Java heap %d of %d MiB\n",
+            Debug.getNativeHeapAllocatedSize() / 1048576,
+            (Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) / 1048576,
+            Runtime.getRuntime().maxMemory() / 1048576))
+        out.append("    rss     pss    priv    swap  reserved  maps  name (MiB)\n")
+        groups.entries.sortedByDescending { it.value.pss }.take(top).forEach { (name, g) ->
+            out.append(String.format(Locale.US, "%7d %7d %7d %7d %9d %5d  %s\n", g.rss / 1024, g.pss / 1024,
+                g.priv / 1024, g.swap / 1024, g.size / 1024, g.count, name.take(90)))
+        }
+        return out.toString()
     }
 
     private fun lastExit(context: Context, count: Int): String {

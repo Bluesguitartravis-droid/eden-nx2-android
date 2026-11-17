@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Eden NX2: Claude bridge. An MCP server (Streamable HTTP, JSON responses) inside the app, so
 // Claude can read performance, change settings and switches, take screenshots and press buttons.
-// Off until the player turns it on in the Lab screen. It listens on 127.0.0.1 only; the tunnel
-// (Nx2Tunnel) forwards the public address to it, and every request must carry the secret path.
+// Off until the player turns it on in the Lab screen. It listens on 127.0.0.1:38618 only. The
+// public side (ngrok tunnel and the server on 38617) runs in its own process, Nx2FrontService
+// (":nx2lab"), which forwards requests here and keeps answering while Eden is closed or restarting.
+// Every request must carry the secret path.
 package io.github.zortos293.lichii.nx2
 
 import android.app.ActivityManager
@@ -56,13 +58,15 @@ import java.util.concurrent.atomic.AtomicReference
 
 object Nx2Bridge {
     private const val TAG = "NX2_BRIDGE"
+    /** The Claude Lab front server (":nx2lab" process), behind the tunnel. */
     const val PORT = 38617
+    /** This bridge, in Eden's own process; only the front server talks to it. */
+    const val BACKEND_PORT = 38618
     private const val PREFS = "nx2_bridge"
     private const val KEY_ENABLED = "enabled"
     private const val KEY_SECRET = "secret"
     private const val KEY_TOKEN = "ngrok_token"
     private const val KEY_LAST_GAME = "last_game_path"
-    private const val MAX_BODY = 1 shl 20
     private val PROTOCOLS = listOf("2025-06-18", "2025-03-26", "2024-11-05")
 
     private lateinit var app: Application
@@ -87,7 +91,7 @@ object Nx2Bridge {
     fun isHelperProcess(application: Application): Boolean {
         val name = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) Application.getProcessName()
         else runCatching { File("/proc/self/cmdline").readText().trimEnd('\u0000') }.getOrDefault("")
-        return name.endsWith(":nx2restart")
+        return name.endsWith(":nx2restart") || name.endsWith(Nx2FrontService.PROCESS_SUFFIX)
     }
 
     fun initialize(application: Application) {
@@ -119,37 +123,52 @@ object Nx2Bridge {
         SecureRandom().nextBytes(bytes)
         val value = Base64.encodeToString(bytes, Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
         prefs().edit().putString(KEY_SECRET, value).apply()
+        // The front server checks the secret itself: give it the new one.
+        if (::app.isInitialized && isEnabled()) Nx2FrontService.start(app, ngrokToken(), value, false)
         return value
     }
 
     /** The address to paste into Claude's connector settings, or null while the tunnel is down. */
-    fun connectorUrl(): String? = Nx2Tunnel.publicUrl()?.let { it.trimEnd('/') + "/mcp/" + secret() }
+    fun connectorUrl(): String? =
+        Nx2Tunnel.sharedState(app).first?.let { it.trimEnd('/') + "/mcp/" + secret() }
+
+    /** Why the tunnel is not up, as the Lab process reported it. */
+    fun tunnelError(): String? = Nx2Tunnel.sharedState(app).second
 
     /** Remembered by EmulationActivity so restart_app can bring the same game back. */
     fun rememberGame(path: String?) {
         if (!::app.isInitialized || path.isNullOrEmpty()) return
         prefs().edit().putString(KEY_LAST_GAME, path).apply()
+        // For the Lab process, whose copy of these preferences is not refreshed.
+        runCatching { lastGameFile(app).apply { parentFile?.mkdirs() }.writeText(path) }
     }
+
+    internal fun lastGameFile(context: Context) = File(File(context.filesDir, "nx2-lab"), "last_game.txt")
+
+    /** The last game, readable from either process. */
+    internal fun lastGamePath(context: Context): String? =
+        runCatching { lastGameFile(context).readText().trim() }.getOrNull()?.ifEmpty { null }
+            ?: context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_LAST_GAME, null)
 
     @Synchronized
     private fun start() {
         if (server != null) return
         try {
-            val socket = ServerSocket(PORT, 16, InetAddress.getByName("127.0.0.1"))
+            val socket = ServerSocket(BACKEND_PORT, 16, InetAddress.getByName("127.0.0.1"))
             server = socket
             Thread({ acceptLoop(socket) }, "NX2-Bridge-Accept").apply { isDaemon = true }.start()
-            android.util.Log.i(TAG, "Bridge listening on 127.0.0.1:$PORT")
+            android.util.Log.i(TAG, "Bridge listening on 127.0.0.1:$BACKEND_PORT")
         } catch (error: Exception) {
             android.util.Log.w(TAG, "Bridge could not start", error)
             server = null
         }
         Nx2LabService.start(app)
-        Nx2Tunnel.start(app, ngrokToken(), PORT)
+        Nx2FrontService.start(app, ngrokToken(), secret(), false)
     }
 
     @Synchronized
     private fun stop() {
-        Nx2Tunnel.stop()
+        Nx2FrontService.stop(app)
         Nx2LabService.stop(app)
         runCatching { server?.close() }
         server = null
@@ -157,8 +176,7 @@ object Nx2Bridge {
 
     fun restartTunnel() {
         if (!isEnabled()) return
-        Nx2Tunnel.stop()
-        Nx2Tunnel.start(app, ngrokToken(), PORT)
+        Nx2FrontService.start(app, ngrokToken(), secret(), true)
     }
 
     private fun acceptLoop(socket: ServerSocket) {
@@ -172,96 +190,16 @@ object Nx2Bridge {
         }
     }
 
-    // ---- HTTP -------------------------------------------------------------------------------
-
-    private class Request(val method: String, val path: String, val headers: Map<String, String>,
-                          val body: ByteArray)
-
-    private fun readLine(input: InputStream): String? {
-        val out = ByteArrayOutputStream()
-        while (true) {
-            val b = input.read()
-            if (b < 0) return if (out.size() == 0) null else out.toString("UTF-8")
-            if (b == '\n'.code) break
-            if (b != '\r'.code) out.write(b)
-            if (out.size() > 16384) throw IllegalStateException("header line too long")
-        }
-        return out.toString("UTF-8")
-    }
-
-    private fun readExactly(input: InputStream, count: Int): ByteArray {
-        val data = ByteArray(count)
-        var offset = 0
-        while (offset < count) {
-            val n = input.read(data, offset, count - offset)
-            if (n < 0) throw IllegalStateException("body ended early")
-            offset += n
-        }
-        return data
-    }
-
-    private fun readRequest(input: InputStream): Request? {
-        val first = readLine(input) ?: return null
-        val parts = first.split(' ')
-        if (parts.size < 2) return null
-        val headers = HashMap<String, String>()
-        while (true) {
-            val line = readLine(input) ?: break
-            if (line.isEmpty()) break
-            val colon = line.indexOf(':')
-            if (colon > 0) {
-                headers[line.substring(0, colon).trim().lowercase(Locale.US)] = line.substring(colon + 1).trim()
-            }
-        }
-        val body = when {
-            headers["transfer-encoding"]?.contains("chunked", ignoreCase = true) == true -> {
-                val out = ByteArrayOutputStream()
-                while (true) {
-                    val sizeLine = readLine(input) ?: break
-                    val size = sizeLine.substringBefore(';').trim().toInt(16)
-                    if (size == 0) {
-                        while (true) { val trailer = readLine(input) ?: break; if (trailer.isEmpty()) break }
-                        break
-                    }
-                    if (out.size() + size > MAX_BODY) throw IllegalStateException("body too large")
-                    out.write(readExactly(input, size))
-                    readLine(input)
-                }
-                out.toByteArray()
-            }
-            else -> {
-                val length = headers["content-length"]?.toIntOrNull() ?: 0
-                if (length > MAX_BODY) throw IllegalStateException("body too large")
-                readExactly(input, length)
-            }
-        }
-        return Request(parts[0].uppercase(Locale.US), parts[1], headers, body)
-    }
-
-    private fun respond(out: OutputStream, status: Int, reason: String, body: ByteArray?,
-                        contentType: String? = null, extra: Map<String, String> = emptyMap()) {
-        val head = StringBuilder()
-        head.append("HTTP/1.1 ").append(status).append(' ').append(reason).append("\r\n")
-        if (contentType != null) head.append("Content-Type: ").append(contentType).append("\r\n")
-        head.append("Content-Length: ").append(body?.size ?: 0).append("\r\n")
-        head.append("Cache-Control: no-store\r\n")
-        for ((k, v) in extra) head.append(k).append(": ").append(v).append("\r\n")
-        head.append("Connection: close\r\n\r\n")
-        out.write(head.toString().toByteArray(Charsets.UTF_8))
-        if (body != null) out.write(body)
-        out.flush()
-    }
-
     private fun handle(client: Socket) {
         client.use { socket ->
             try {
                 socket.soTimeout = 30000
                 val input = BufferedInputStream(socket.getInputStream())
                 val out = socket.getOutputStream()
-                val request = readRequest(input) ?: return
+                val request = Nx2Http.readRequest(input) ?: return
                 val path = request.path.substringBefore('?')
                 if (path.trimEnd('/') != "/mcp/" + secret()) {
-                    respond(out, 404, "Not Found", null)
+                    Nx2Http.respond(out, 404, "Not Found", null)
                     return
                 }
                 when (request.method) {
@@ -270,14 +208,14 @@ object Nx2Bridge {
                         requestCount++
                         val reply = handleRpcBody(String(request.body, Charsets.UTF_8))
                         if (reply == null) {
-                            respond(out, 202, "Accepted", null)
+                            Nx2Http.respond(out, 202, "Accepted", null)
                         } else {
-                            respond(out, 200, "OK", reply.toByteArray(Charsets.UTF_8),
+                            Nx2Http.respond(out, 200, "OK", reply.toByteArray(Charsets.UTF_8),
                                 "application/json", mapOf("Mcp-Session-Id" to "nx2-eden"))
                         }
                     }
-                    "DELETE" -> respond(out, 200, "OK", null)
-                    else -> respond(out, 405, "Method Not Allowed", null, extra = mapOf("Allow" to "POST"))
+                    "DELETE" -> Nx2Http.respond(out, 200, "OK", null)
+                    else -> Nx2Http.respond(out, 405, "Method Not Allowed", null, extra = mapOf("Allow" to "POST"))
                 }
             } catch (error: Exception) {
                 android.util.Log.w(TAG, "Request failed", error)
@@ -335,7 +273,7 @@ object Nx2Bridge {
 
     // ---- helpers used by the tools ----------------------------------------------------------
 
-    internal fun lastGamePath(): String? = prefs().getString(KEY_LAST_GAME, null)
+    internal fun lastGamePath(): String? = lastGamePath(app)
 
     internal fun inputExecutor() = inputPool
 }
@@ -485,6 +423,40 @@ internal object Nx2Tools {
     } catch (failure: Exception) {
         error(failure.toString())
     }
+
+    /** Tools the Lab process (":nx2lab") answers by itself while Eden's own process is down:
+     *  they only read or write files and settings, never the emulator. */
+    val OFFLINE = setOf("status", "read_log", "last_exit", "list_marks", "get_mark", "notebook_read",
+        "notebook_append", "get_switches", "set_switches", "list_games")
+
+    fun callOffline(context: Context, name: String, args: JSONObject, why: String): JSONObject = try {
+        when (name) {
+            "status" -> text(offlineStatus(context, why))
+            "get_switches" -> text("file ${switchesFile().path}:\n" +
+                (if (switchesFile().isFile) switchesFile().readText() else "(none)") +
+                "\n(Eden is not running, so nothing is in effect now)")
+            in OFFLINE -> call(context, name, args)
+            else -> error("Unknown tool $name")
+        }
+    } catch (failure: Exception) {
+        error(failure.toString())
+    }
+
+    fun offlineStatus(context: Context, why: String): String {
+        val out = StringBuilder()
+        out.append("app_build=").append(Nx2FlightRecorder.buildTag()).append('\n')
+        out.append("eden_running=false (").append(why).append(")\n")
+        out.append("game_running=false\n")
+        out.append("last_game=").append(Nx2Bridge.lastGamePath(context) ?: "-").append('\n')
+        out.append("last_exit=").append(runCatching { lastExit(context, 1) }.getOrDefault("?")).append('\n')
+        out.append("switches_file=").append(switchesFile().let {
+            if (it.isFile) it.readText().trim().replace('\n', ' ') else "(none)" }).append('\n')
+        out.append("Answering from the Claude Lab process. restart_app or launch_game start Eden again.\n")
+        return out.toString()
+    }
+
+    internal fun textResult(value: String) = text(value)
+    internal fun errorResult(value: String) = error(value)
 
     private fun text(value: String) = JSONObject()
         .put("content", JSONArray().put(JSONObject().put("type", "text").put("text", value)))
@@ -1092,7 +1064,8 @@ internal object Nx2Tools {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return "Needs Android 11"
         val manager = context.getSystemService(ActivityManager::class.java)
         val reasons = manager.getHistoricalProcessExitReasons(context.packageName, 0, count + 4)
-            .filter { !it.processName.endsWith(":nx2restart") }.take(count)
+            .filter { !it.processName.endsWith(":nx2restart") &&
+                !it.processName.endsWith(Nx2FrontService.PROCESS_SUFFIX) }.take(count)
         if (reasons.isEmpty()) return "Android has no record of earlier runs"
         val names = mapOf(0 to "unknown", 1 to "exit (the app ended itself)", 2 to "signaled",
             3 to "LOW MEMORY (Android closed it for memory)", 4 to "CRASH (Java)", 5 to "CRASH (native)",

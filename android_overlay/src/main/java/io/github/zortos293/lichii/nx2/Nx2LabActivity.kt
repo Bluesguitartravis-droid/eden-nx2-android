@@ -202,7 +202,7 @@ class Nx2LabActivity : Activity() {
             url != null -> "On and reachable. Claude has made ${Nx2Bridge.requestCount} requests" +
                 (if (Nx2Bridge.lastRequestMs > 0) ", last " +
                     ((System.currentTimeMillis() - Nx2Bridge.lastRequestMs) / 1000) + " s ago." else ".")
-            Nx2Tunnel.lastError != null -> "Not reachable yet: ${Nx2Tunnel.lastError}"
+            Nx2Bridge.tunnelError() != null -> "Not reachable yet: ${Nx2Bridge.tunnelError()}"
             else -> "Connecting…"
         }
         address.text = url ?: "(appears once it's on and connected)"

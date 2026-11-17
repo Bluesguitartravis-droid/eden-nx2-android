@@ -49,8 +49,9 @@ def patch(relative, old, new, mark=MARK):
     print("patched:", relative)
 
 
-# The restart helper runs in its own process (":nx2restart"): the app's start-up (native library,
-# log rotation, flight recorder recovery, the bridge's port) must not run there.
+# The restart helper (":nx2restart") and the Claude connection (":nx2lab", Nx2FrontService) run in
+# their own processes: the app's start-up (native library, log rotation, flight recorder recovery,
+# the bridge's port) must not run there.
 patch("java/io/github/zortos293/lichii/LichiiApplication.kt",
       "        super.onCreate()\n        application = this\n"
       "        io.github.zortos293.lichii.utils.Nx2FlightRecorder.initialize(this)\n",
@@ -106,6 +107,16 @@ patch("AndroidManifest.xml",
       "            <property\n"
       "                android:name=\"android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE\"\n"
       "                android:value=\"Claude Lab: debugging connection to Claude while the player tests games\" />\n"
+      "        </service>\n"
+      "        <!-- The Claude connection in its own process: stays up while Eden is closed or restarting. -->\n"
+      "        <service\n"
+      "            android:name=\"io.github.zortos293.lichii.nx2.Nx2FrontService\"\n"
+      "            android:exported=\"false\"\n"
+      "            android:process=\":nx2lab\"\n"
+      "            android:foregroundServiceType=\"specialUse\">\n"
+      "            <property\n"
+      "                android:name=\"android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE\"\n"
+      "                android:value=\"Claude Lab: connection to Claude that survives emulator restarts\" />\n"
       "        </service>\n"
       "    </application>\n")
 

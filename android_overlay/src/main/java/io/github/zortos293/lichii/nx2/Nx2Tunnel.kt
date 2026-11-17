@@ -1,18 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Eden NX2: runs libnx2tunnel.so (tools/nx2tunnel, ngrok) so the Claude bridge on 127.0.0.1 gets a
 // public https address. Restarts it with a growing delay if it stops while the bridge is on.
+// Runs in the Claude Lab process (":nx2lab", Nx2FrontService). The address and the last error are
+// also written to files/nx2-lab/tunnel.json so the Lab screen in Eden's own process can show them.
 package io.github.zortos293.lichii.nx2
 
 import android.content.Context
 import android.util.Log
+import org.json.JSONObject
 import java.io.File
 
 object Nx2Tunnel {
     private const val TAG = "NX2_TUNNEL"
     @Volatile private var process: java.lang.Process? = null
     @Volatile private var url: String? = null
+        set(value) { field = value; writeState() }
     @Volatile var lastError: String? = null
-        private set
+        private set(value) { field = value; writeState() }
+    @Volatile private var stateTarget: File? = null
     @Volatile private var wanted = false
     private var generation = 0
 
@@ -23,6 +28,7 @@ object Nx2Tunnel {
     @Synchronized
     fun start(context: Context, token: String, port: Int) {
         wanted = true
+        stateTarget = stateFile(context)
         if (token.isBlank()) {
             lastError = "Add your ngrok code in the Lab screen"
             return
@@ -35,6 +41,26 @@ object Nx2Tunnel {
         }
         val myGeneration = ++generation
         Thread({ runLoop(binary, token, port, myGeneration) }, "NX2-Tunnel").apply { isDaemon = true }.start()
+    }
+
+    /** files/nx2-lab/tunnel.json: {"url": ..., "error": ...}, written by the Lab process. */
+    fun stateFile(context: Context) = File(File(context.filesDir, "nx2-lab"), "tunnel.json")
+
+    /** Address and error as the Lab process last wrote them (for Eden's own process). */
+    fun sharedState(context: Context): Pair<String?, String?> {
+        val json = runCatching { JSONObject(stateFile(context).readText()) }.getOrNull()
+            ?: return null to null
+        return json.optString("url").ifEmpty { null } to json.optString("error").ifEmpty { null }
+    }
+
+    private fun writeState() {
+        val file = stateTarget ?: return
+        runCatching {
+            file.parentFile?.mkdirs()
+            val tmp = File(file.parentFile, file.name + ".tmp")
+            tmp.writeText(JSONObject().put("url", url ?: "").put("error", lastError ?: "").toString())
+            tmp.renameTo(file)
+        }
     }
 
     @Synchronized

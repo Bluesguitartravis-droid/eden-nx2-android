@@ -75,6 +75,34 @@ internal object Nx2Http {
         return Request(parts[0].uppercase(Locale.US), parts[1], headers, body)
     }
 
+    class Response(val status: Int, val headers: Map<String, String>, val body: ByteArray)
+
+    /** A response from the bridge: status line, headers, then Content-Length bytes (the bridge
+     *  always sends Content-Length and closes), or everything up to the end if there is none. */
+    fun readResponse(input: InputStream): Response? {
+        val first = readLine(input) ?: return null
+        val parts = first.split(' ')
+        if (parts.size < 2) return null
+        val status = parts[1].toIntOrNull() ?: return null
+        val headers = HashMap<String, String>()
+        while (true) {
+            val line = readLine(input) ?: break
+            if (line.isEmpty()) break
+            val colon = line.indexOf(':')
+            if (colon > 0) {
+                headers[line.substring(0, colon).trim().lowercase(Locale.US)] = line.substring(colon + 1).trim()
+            }
+        }
+        val length = headers["content-length"]?.toIntOrNull()
+        val body = if (length != null) {
+            if (length > MAX_BODY * 16) throw IllegalStateException("reply too large")
+            readExactly(input, length)
+        } else {
+            input.readBytes()
+        }
+        return Response(status, headers, body)
+    }
+
     fun respond(out: OutputStream, status: Int, reason: String, body: ByteArray?,
                         contentType: String? = null, extra: Map<String, String> = emptyMap()) {
         val head = StringBuilder()

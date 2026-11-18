@@ -30,12 +30,10 @@ import java.io.BufferedInputStream
 import java.io.File
 import java.io.IOException
 import java.net.ConnectException
-import java.net.HttpURLConnection
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
-import java.net.URL
 import java.util.concurrent.Executors
 
 class Nx2FrontService : Service() {
@@ -203,25 +201,31 @@ class Nx2FrontService : Service() {
             ?.any { it.processName == packageName } ?: false
     }.getOrDefault(false)
 
+    /** One request to the bridge in Eden's process. A plain socket, not HttpURLConnection:
+     *  Android refuses cleartext HTTP from HttpURLConnection for this app (targetSdk 36, no
+     *  network security exception), even to 127.0.0.1, which broke every call in build 193. */
     private fun forward(request: Nx2Http.Request): Reply {
-        val connection = URL("http://127.0.0.1:${Nx2Bridge.BACKEND_PORT}/mcp/$secret")
-            .openConnection() as HttpURLConnection
-        try {
-            connection.connectTimeout = 2000
-            connection.readTimeout = 180_000
-            connection.requestMethod = "POST"
-            connection.doOutput = true
-            connection.setRequestProperty("Content-Type", "application/json")
-            connection.setRequestProperty("Accept", "application/json, text/event-stream")
-            request.headers["mcp-protocol-version"]?.let { connection.setRequestProperty("Mcp-Protocol-Version", it) }
-            connection.connect()
-            connection.outputStream.use { it.write(request.body) }
-            val status = connection.responseCode
-            val stream = if (status >= 400) connection.errorStream else connection.inputStream
-            val body = stream?.use { it.readBytes() }
-            return Reply(status, if (status == 202) null else body, connection.contentType ?: "application/json")
-        } finally {
-            connection.disconnect()
+        Socket().use { socket ->
+            socket.connect(InetSocketAddress("127.0.0.1", Nx2Bridge.BACKEND_PORT), 2000)
+            socket.soTimeout = 180_000
+            val head = StringBuilder()
+                .append("POST /mcp/").append(secret).append(" HTTP/1.1\r\n")
+                .append("Host: 127.0.0.1:").append(Nx2Bridge.BACKEND_PORT).append("\r\n")
+                .append("Content-Type: application/json\r\n")
+                .append("Accept: application/json, text/event-stream\r\n")
+            request.headers["mcp-protocol-version"]?.let {
+                head.append("Mcp-Protocol-Version: ").append(it).append("\r\n")
+            }
+            head.append("Content-Length: ").append(request.body.size).append("\r\n")
+                .append("Connection: close\r\n\r\n")
+            val out = socket.getOutputStream()
+            out.write(head.toString().toByteArray(Charsets.UTF_8))
+            out.write(request.body)
+            out.flush()
+            val response = Nx2Http.readResponse(BufferedInputStream(socket.getInputStream()))
+                ?: throw IOException("Eden closed the connection without a reply")
+            return Reply(response.status, if (response.status == 202) null else response.body,
+                response.headers["content-type"] ?: "application/json")
         }
     }
 

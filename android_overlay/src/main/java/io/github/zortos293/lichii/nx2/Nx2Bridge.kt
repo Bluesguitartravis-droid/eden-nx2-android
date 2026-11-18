@@ -304,8 +304,12 @@ internal object Nx2Tools {
         .put(tool("performance", "Live memory, heat and GPU load, plus the latest performance lines " +
             "from the native log (frame rate and frame times every 10 s).",
             schema(JSONObject().put("seconds", prop("integer", "How far back in the log, default 30"))), true))
-        .put(tool("read_log", "Lines from the end of the native log, optionally filtered.",
+        .put(tool("read_log", "Lines from the end of the native log, optionally filtered. " +
+            "file: \"current\" (default), \"previous\" (the run before; Eden rotates the log at " +
+            "start, so after a crash and relaunch the crashed run is here) or \"crash\" " +
+            "(nx2_crash.txt: the native crash handler's report, written as Eden dies).",
             schema(JSONObject()
+                .put("file", prop("string", "current, previous or crash"))
                 .put("pattern", prop("string", "Regular expression lines must match (optional)"))
                 .put("max_lines", prop("integer", "Default 200, at most 2000"))
                 .put("search_bytes", prop("integer", "How much of the log end to search, default 4 MiB"))), true))
@@ -390,7 +394,8 @@ internal object Nx2Tools {
         when (name) {
             "status" -> text(status(context))
             "performance" -> text(performance(context, args.optInt("seconds", 30)))
-            "read_log" -> text(readLog(context, args.optString("pattern", ""),
+            "read_log" -> text(readLog(context, args.optString("file", "current"),
+                args.optString("pattern", ""),
                 args.optInt("max_lines", 200).coerceIn(1, 2000),
                 args.optLong("search_bytes", 4L shl 20).coerceIn(4096L, 32L shl 20)))
             "frame_trace_summary" -> text(frameTrace(context, args.optInt("seconds", 30),
@@ -465,8 +470,10 @@ internal object Nx2Tools {
 
     // ---- status / performance / logs --------------------------------------------------------
 
-    private fun nativeLog(context: Context): File? =
-        context.getExternalFilesDir(null)?.let { File(File(it, "log"), "eden_log.txt") }
+    private fun nativeLog(context: Context): File? = logFile(context, "eden_log.txt")
+
+    private fun logFile(context: Context, name: String): File? =
+        context.getExternalFilesDir(null)?.let { File(File(it, "log"), name) }
 
     private fun tail(file: File?, bytes: Long): String {
         if (file == null || !file.isFile) return ""
@@ -549,13 +556,25 @@ internal object Nx2Tools {
         return out.toString()
     }
 
-    private fun readLog(context: Context, pattern: String, maxLines: Int, bytes: Long): String {
+    private fun readLog(context: Context, which: String, pattern: String, maxLines: Int,
+                        bytes: Long): String {
+        val file = when (which.lowercase()) {
+            "", "current" -> nativeLog(context)
+            "previous" -> logFile(context, "eden_log.txt.old.txt")
+            "crash" -> logFile(context, "nx2_crash.txt")
+            else -> return "Unknown file \"$which\": current, previous or crash"
+        }
+        if (file == null || !file.isFile) return "(no ${which.lowercase()} log file)"
+        val modified = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US)
+            .format(java.util.Date(file.lastModified()))
         val regex = if (pattern.isEmpty()) null else Regex(pattern)
-        val lines = tail(nativeLog(context), bytes).lines()
+        val lines = tail(file, bytes).lines()
             .filter { regex == null || regex.containsMatchIn(it) }
             .takeLast(maxLines)
         val text = lines.joinToString("\n") { it.take(1000) }
-        return if (text.length > 120_000) text.takeLast(120_000) else text.ifEmpty { "(no matching lines)" }
+        val body = if (text.length > 120_000) text.takeLast(120_000) else text.ifEmpty { "(no matching lines)" }
+        return if (which.lowercase() in setOf("", "current")) body
+        else "${file.name}, last written $modified:\n$body"
     }
 
     private fun frameTrace(context: Context, seconds: Int, top: Int): String {

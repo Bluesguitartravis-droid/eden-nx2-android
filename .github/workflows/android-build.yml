@@ -193,6 +193,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-heap-sites.py upstream
 
+      - name: Dynarmic keeps each compiled block's tables in compact lists (Ocarina ~6 GB)
+        shell: bash
+        run: python3 scripts/apply-nx2-dynarmic-compact-blocks.py upstream
+
       - name: Fastmem mapping diagnostics (NX2_HOSTMEM)
         shell: bash
         run: python3 scripts/apply-nx2-hostmem-diag.py upstream

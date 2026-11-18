@@ -189,6 +189,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-android-mimalloc-names.py upstream
 
+      - name: NX2_HEAP - log which code holds the emulator's C++ memory
+        shell: bash
+        run: python3 scripts/apply-nx2-heap-sites.py upstream
+
       - name: Fastmem mapping diagnostics (NX2_HOSTMEM)
         shell: bash
         run: python3 scripts/apply-nx2-hostmem-diag.py upstream

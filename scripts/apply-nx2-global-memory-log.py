@@ -90,6 +90,10 @@ for inc in ("#include <mutex>\n", "#include <unordered_set>\n", "#include <unord
 compute_anchor = ("    auto program{TranslateProgram(pools.inst, pools.block, env, cfg, host_info)};\n"
                   "    const VkDriverIdKHR driver_id = device.GetDriverID();\n")
 if text.count(compute_anchor) != 1:
+    # Lichii 2026-11-16 checks the program's constant buffers between the two lines: log right
+    # after the translation (the one compute TranslateProgram into `program`).
+    compute_anchor = "    auto program{TranslateProgram(pools.inst, pools.block, env, cfg, host_info)};\n"
+if text.count(compute_anchor) != 1:
     raise SystemExit("vk_pipeline_cache.cpp: compute TranslateProgram not found")
 text = text.replace(compute_anchor, compute_anchor + r'''    {
         // NX2_COMPUTE: the shape of each compute program (build 164's trace: one Ocarina dispatch
@@ -143,5 +147,28 @@ text = text.replace(compute_anchor, compute_anchor + r'''    {
         }
     }
 ''', 1)
+# Lichii 2026-11-15+ (#1807) routes each native access among its own candidate buffers: log how
+# many accesses have their own route, how many distinct routes, and the largest one.
+program_h = Path(sys.argv[1]) / "src/shader_recompiler/frontend/ir/program.h"
+if "global_memory_routes" in program_h.read_text():
+    old_log = """                LOG_INFO(Render_Vulkan,
+                         "NX2_GMEM s{}:{:016x} loads={} stores={} atomics={} candidates={} "
+                         "indirect={} native={}",
+                         index, nx2_hash, loads, stores, atomics, descriptors.size(), indirect,
+                         programs[index].info.native_global_bounds ? 1 : 0);"""
+    new_log = """                size_t nx2_max_route{};
+                for (const auto& route : programs[index].global_memory_routes) {
+                    nx2_max_route = std::max(nx2_max_route, route.size());
+                }
+                LOG_INFO(Render_Vulkan,
+                         "NX2_GMEM s{}:{:016x} loads={} stores={} atomics={} candidates={} "
+                         "indirect={} native={} routed={} routes={} max_route={}",
+                         index, nx2_hash, loads, stores, atomics, descriptors.size(), indirect,
+                         programs[index].info.native_global_bounds ? 1 : 0,
+                         programs[index].global_memory_route.size(),
+                         programs[index].global_memory_routes.size(), nx2_max_route);"""
+    if text.count(old_log) != 1:
+        raise SystemExit("vk_pipeline_cache.cpp: NX2_GMEM log line not found")
+    text = text.replace(old_log, new_log, 1)
 path.write_text(text)
 print("NX2_GMEM / NX2_COMPUTE shader logging installed")

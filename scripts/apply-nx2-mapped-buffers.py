@@ -24,10 +24,7 @@ def patch(rel, old, new, marker):
         raise SystemExit(f"{rel}: anchor not found: {old[:70]!r}")
     p.write_text(t.replace(old, new, 1))
 
-patch("renderer_vulkan/vk_buffer_cache.cpp",
-      """    return memory_allocator.CreateBuffer(
-        buffer_ci, device.IsMoltenVK() ? MemoryUsage::Stream : MemoryUsage::DeviceLocal);""",
-      """    static const bool nx2_mapped = [&device] {
+NX2_MAPPED_STATIC = """    static const bool nx2_mapped = [&device] {
         const char* v = std::getenv("EDEN_NX2_MAPPED_BUFFERS");
         if (v && v[0] == '0') {
             return false;
@@ -39,10 +36,38 @@ patch("renderer_vulkan/vk_buffer_cache.cpp",
                  unified ? "on (unified memory)" : "off");
         return unified;
     }();
-    return memory_allocator.CreateBuffer(
+"""
+_cache = (root / "renderer_vulkan/vk_buffer_cache.cpp").read_text()
+if "CreateAfterRecovery(" in _cache and "EDEN_NX2_MAPPED_BUFFERS" not in _cache:
+    # Lichii 2026-11-16 (#1963) creates the buffer inside CreateAfterRecovery, which frees the
+    # staging pool and retries when there is no memory: keep that, choose the memory inside it.
+    patch("renderer_vulkan/vk_buffer_cache.cpp",
+          """    return CreateAfterRecovery(
+        [&] {
+            if (sparse_alignment > 1) {
+                return memory_allocator.CreateBuffer(buffer_ci, MemoryUsage::DeviceLocal,
+                                                     sparse_alignment);
+            }
+            return memory_allocator.CreateBuffer(
+                buffer_ci, device.IsMoltenVK() ? MemoryUsage::Stream : MemoryUsage::DeviceLocal);""",
+          NX2_MAPPED_STATIC + """    return CreateAfterRecovery(
+        [&] {
+            if (sparse_alignment > 1) {
+                return memory_allocator.CreateBuffer(buffer_ci, MemoryUsage::DeviceLocal,
+                                                     sparse_alignment);
+            }
+            return memory_allocator.CreateBuffer(
+                buffer_ci, (device.IsMoltenVK() || nx2_mapped) ? MemoryUsage::Stream
+                                                               : MemoryUsage::DeviceLocal);""",
+          "EDEN_NX2_MAPPED_BUFFERS")
+else:
+    patch("renderer_vulkan/vk_buffer_cache.cpp",
+          """    return memory_allocator.CreateBuffer(
+        buffer_ci, device.IsMoltenVK() ? MemoryUsage::Stream : MemoryUsage::DeviceLocal);""",
+          NX2_MAPPED_STATIC + """    return memory_allocator.CreateBuffer(
         buffer_ci, (device.IsMoltenVK() || nx2_mapped) ? MemoryUsage::Stream
                                                        : MemoryUsage::DeviceLocal);""",
-      "EDEN_NX2_MAPPED_BUFFERS")
+          "EDEN_NX2_MAPPED_BUFFERS")
 p = root / "renderer_vulkan/vk_buffer_cache.cpp"
 t = p.read_text()
 if "#include <cstdlib>" not in t:

@@ -28,6 +28,12 @@ import sys
 root = Path(sys.argv[1])
 MARK = "NX2 per-primitive mesh emulation"
 
+# Lichii 2026-11-16 (#1940) draws per-primitive mesh outputs in the compute fallback itself,
+# with the same block layout, Layer/ViewportIndex as built-ins and PrimitiveId as well.
+if "per_primitive_flat" in (root / "src/shader_recompiler/runtime_info.h").read_text():
+    print("Skipped: upstream emulates per-primitive mesh outputs itself (#1940)")
+    sys.exit(0)
+
 
 def patch(rel, edits):
     path = root / rel

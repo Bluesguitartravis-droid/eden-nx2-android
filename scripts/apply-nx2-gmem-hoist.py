@@ -33,6 +33,14 @@ import sys
 spirv = Path(sys.argv[1]) / "src/shader_recompiler/backend/spirv"
 MARK = "NX2 hoisted global memory bases"
 
+# Lichii 2026-11-15+ (#1807, #1848, #2103) rebuilt the global memory helpers: each native access
+# routes among its own candidate buffers (one helper set per distinct set) and the offset comes
+# from the routed base once. This patch targets the old single helper set; it is left out on
+# that base until measured on the Odin (Ocarina NX2_GMEM routed= / max_route=).
+if "global_memory_functions" in (spirv / "spirv_emit_context.h").read_text():
+    print("Skipped: upstream routes each access among its own candidates (#1807); hoisted bases not ported")
+    sys.exit(0)
+
 
 def patch(name, edits):
     path = spirv / name

@@ -119,10 +119,17 @@ if marker not in data:
     end_marker = "\n    if (should_pass_arguments"
     start = data.find(start_marker)
     end = data.find(end_marker, start)
-    if start < 0 or end < 0:
+    if (start < 0 or end < 0) and "ASSERT(r > 0)" not in data:
+        # Newer Lichii (2026-11-15+, #1918/#1920) reshaped the loop and refuses short reads and
+        # failed decompression itself: nothing left for this guard.
+        print("Skipped: NSO segment guard (upstream checks reads and decompression itself)")
+        marker = None
+        start = end = 0
+    elif start < 0 or end < 0:
         raise SystemExit(f"Could not find NSO decode loop in {nso_file}")
     original = data[start:end]
-    if "ASSERT(r > 0)" not in original or "ASSERT(r == int(nso_header.segments[i].size))" not in original:
+    if marker is not None and ("ASSERT(r > 0)" not in original or
+                               "ASSERT(r == int(nso_header.segments[i].size))" not in original):
         # Newer Lichii fails the NSO load itself when decompression fails (#160).
         print("Skipped: NSO segment guard (upstream checks decompression itself)")
         marker = None

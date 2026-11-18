@@ -92,10 +92,10 @@ jobs:
           # Lichii is zortos293's continuation of Eglantine nx2 (9a435b5 is an ancestor).
           git clone --recursive --branch nx2 --single-branch \
             https://github.com/zortos293/Lichii.git upstream
-          # dc9af208e: Lichii nx2 of 2026-11-14 09:29 UTC (170 commits after faa4bd13a, the base of
-          # builds 159-169). Lichii renamed the Kotlin package to io.github.zortos293.lichii; the
+          # 1d471c6fa: Lichii nx2 of 2026-11-17 23:49 UTC (303 commits after dc9af208e, the base of
+          # builds 170-192). Lichii renamed the Kotlin package to io.github.zortos293.lichii; the
           # applicationId (dev.eden.eden_emulator), so the app's data folder, is unchanged.
-          git -C upstream checkout dc9af208e
+          git -C upstream checkout 1d471c6fa
           # godpow's ARM64 macro JIT (Djihads80/Eglantine PR #503, from an Odin 3), with the
           # split front using it; EDEN_NX2_MME_JIT=0 goes back to the interpreter.
           git -C upstream -c user.name=ci -c user.email=ci@localhost \
@@ -104,7 +104,7 @@ jobs:
           # now: with them (131-136) Mario Kart World flashed blue and drew low-detail models.
           git -C upstream submodule update --init --recursive
           echo "NX2_COMMIT=$(git -C upstream rev-parse HEAD)" >> "$GITHUB_ENV"
-          echo "NX2_UPSTREAM=zortos293/Lichii:nx2@dc9af20+jit" >> "$GITHUB_ENV"
+          echo "NX2_UPSTREAM=zortos293/Lichii:nx2@1d471c6+jit" >> "$GITHUB_ENV"
           git -C upstream log -1 --oneline
 
       - name: Install host build tools

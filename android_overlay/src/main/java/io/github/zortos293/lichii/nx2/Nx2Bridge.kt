@@ -280,6 +280,7 @@ object Nx2Bridge {
 
 /** The tools Claude sees. Each returns MCP content (text, or an image for screenshots). */
 internal object Nx2Tools {
+    @Volatile private var gpuLine: String? = null
     const val INSTRUCTIONS =
         "Eden NX2 (Switch 2 emulator) on the player's AYN Odin 3. Use status first. Performance " +
         "lines come from the native log every 10 s (NX2_FRAMES, NX2_GPU, NX2_THERMAL); the frame " +
@@ -510,8 +511,16 @@ internal object Nx2Tools {
         if (isRunning) out.append(" paused=").append(runCatching { NativeLibrary.isPaused() }.getOrDefault(false))
         out.append('\n')
         out.append("last_game=").append(Nx2Bridge.lastGamePath() ?: "-").append('\n')
-        runCatching { out.append("gpu=").append(NativeLibrary.getGpuModel()).append(" driver=")
-            .append(NativeLibrary.getGpuDriver()).append(' ').append(NativeLibrary.getVulkanDriverVersion()).append('\n') }
+        // Builds 193/194: asking for these creates a Vulkan instance, which crashed Eden natively
+        // when Android had restarted it in the background (no game screen). Only while a game
+        // runs; otherwise the last answer.
+        if (isRunning) {
+            runCatching {
+                gpuLine = "gpu=" + NativeLibrary.getGpuModel() + " driver=" +
+                    NativeLibrary.getGpuDriver() + " " + NativeLibrary.getVulkanDriverVersion()
+            }
+        }
+        out.append(gpuLine ?: "gpu=(read while a game runs)").append('\n')
         out.append("per_game_settings_loaded=").append(runCatching { NativeConfig.isPerGameConfigLoaded() }.getOrDefault(false)).append('\n')
         for (key in listOf("resolution_setup", "oot_anti_aliasing", "anti_aliasing", "scaling_filter",
             "vram_usage_mode", "precache_shaders", "use_vsync", "gpu_accuracy", "use_disk_shader_cache")) {

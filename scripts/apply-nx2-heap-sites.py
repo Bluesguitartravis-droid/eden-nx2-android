@@ -58,11 +58,17 @@ constexpr size_t kThreshold = size_t{64} << 10;
 constexpr size_t kFrames = 10;
 constexpr size_t kLiveCapacity = size_t{1} << 18; // live blocks (power of two)
 constexpr size_t kSiteCapacity = 4096;             // distinct backtraces
+// Smaller blocks: one is sampled about every kSampleBytes allocated on a thread and counted as
+// kSampleBytes (an estimate of the memory held through that backtrace). A free checks a counter
+// per 64 KiB page first (lock-free), so only pages holding a sampled block take the lock.
+constexpr int64_t kSampleBytes = int64_t{256} << 10;
+constexpr size_t kPageMarks = size_t{1} << 20;
 
 struct Live {
     uintptr_t ptr; // 0 empty (linear probing, back-shift deletion: no tombstones)
-    size_t size;
+    size_t size;   // bytes for a large block, kSampleBytes for a sampled small one
     uint32_t site;
+    bool sampled;
 };
 
 struct Site {
@@ -79,7 +85,29 @@ std::atomic_flag g_lock = ATOMIC_FLAG_INIT;
 size_t g_tracked_bytes = 0;
 size_t g_tracked_blocks = 0;
 size_t g_dropped = 0;
+size_t g_sampled_bytes = 0; // estimate held by sampled small blocks
+std::atomic<uint16_t> g_page_marks[kPageMarks];
 thread_local bool t_inside = false;
+thread_local int64_t t_countdown = kSampleBytes;
+thread_local uint64_t t_random = 0;
+
+size_t PageMark(uintptr_t ptr) {
+    uintptr_t page = ptr >> 16;
+    page ^= page >> 29;
+    page *= 0xbf58476d1ce4e5b9ULL;
+    return static_cast<size_t>(page >> 44) & (kPageMarks - 1);
+}
+
+int64_t NextCountdown() {
+    // Spread the samples (xorshift), so a fixed allocation pattern is not always hit or missed.
+    if (t_random == 0) {
+        t_random = reinterpret_cast<uintptr_t>(&t_random) | 1;
+    }
+    t_random ^= t_random << 13;
+    t_random ^= t_random >> 7;
+    t_random ^= t_random << 17;
+    return kSampleBytes / 2 + static_cast<int64_t>(t_random % static_cast<uint64_t>(kSampleBytes));
+}
 
 // 0 unknown, 1 on, 2 off (EDEN_NX2_HEAP_SITES=0)
 std::atomic<int> g_state{0};
@@ -143,7 +171,19 @@ uint32_t FindSite(const uintptr_t* pcs, uint32_t frames) {
 }
 
 void Record(void* p, size_t n) {
-    if (p == nullptr || n < kThreshold || t_inside || !Enabled()) {
+    if (p == nullptr || t_inside) {
+        return;
+    }
+    bool sampled = false;
+    if (n < kThreshold) {
+        t_countdown -= static_cast<int64_t>(n);
+        if (t_countdown > 0) {
+            return;
+        }
+        t_countdown = NextCountdown();
+        sampled = true;
+    }
+    if (!Enabled()) {
         return;
     }
     t_inside = true;
@@ -159,10 +199,16 @@ void Record(void* p, size_t n) {
             for (size_t probe = 0; probe < kLiveCapacity; ++probe) {
                 Live& slot = g_live[(Hash(key) + probe) & (kLiveCapacity - 1)];
                 if (slot.ptr == 0) {
-                    slot = Live{key, n, site};
-                    g_sites[site].live_bytes += n;
+                    const size_t weight = sampled ? static_cast<size_t>(kSampleBytes) : n;
+                    slot = Live{key, weight, site, sampled};
+                    g_sites[site].live_bytes += weight;
                     g_sites[site].live_blocks += 1;
-                    g_tracked_bytes += n;
+                    if (sampled) {
+                        g_sampled_bytes += weight;
+                        g_page_marks[PageMark(key)].fetch_add(1, std::memory_order_relaxed);
+                    } else {
+                        g_tracked_bytes += weight;
+                    }
                     g_tracked_blocks += 1;
                     stored = true;
                     break;
@@ -177,11 +223,14 @@ void Record(void* p, size_t n) {
 }
 
 void Forget(void* p) {
-    if (p == nullptr || g_state.load(std::memory_order_relaxed) != 1 ||
-        mi_usable_size(p) < kThreshold) {
+    if (p == nullptr || g_state.load(std::memory_order_relaxed) != 1) {
         return;
     }
     const uintptr_t key = reinterpret_cast<uintptr_t>(p);
+    if (g_page_marks[PageMark(key)].load(std::memory_order_relaxed) == 0 &&
+        mi_usable_size(p) < kThreshold) {
+        return; // neither large nor in a page holding a sampled block
+    }
     constexpr size_t mask = kLiveCapacity - 1;
     Lock lock;
     size_t hole = Hash(key) & mask;
@@ -197,7 +246,12 @@ void Forget(void* p) {
     Site& site = g_sites[g_live[hole].site];
     site.live_bytes -= g_live[hole].size;
     site.live_blocks -= 1;
-    g_tracked_bytes -= g_live[hole].size;
+    if (g_live[hole].sampled) {
+        g_sampled_bytes -= g_live[hole].size;
+        g_page_marks[PageMark(key)].fetch_sub(1, std::memory_order_relaxed);
+    } else {
+        g_tracked_bytes -= g_live[hole].size;
+    }
     g_tracked_blocks -= 1;
     g_live[hole].ptr = 0;
     // Back-shift: move later entries of the run into the hole when their home allows it.
@@ -259,12 +313,14 @@ void Report(bool force) {
     };
     Top top[12]{};
     size_t tracked = 0;
+    size_t sampled = 0;
     size_t blocks = 0;
     size_t dropped = 0;
     Site copies[12];
     {
         Lock lock;
         tracked = g_tracked_bytes;
+        sampled = g_sampled_bytes;
         blocks = g_tracked_blocks;
         dropped = g_dropped;
         for (uint32_t index = 0; index < kSiteCapacity; ++index) {
@@ -288,12 +344,11 @@ void Report(bool force) {
             }
         }
     }
-    size_t elapsed = 0, user = 0, system = 0, rss = 0, peak_rss = 0, commit = 0, peak_commit = 0,
-           faults = 0;
-    mi_process_info(&elapsed, &user, &system, &rss, &peak_rss, &commit, &peak_commit, &faults);
+    // (mi_process_info's commit figure underflows without MI_STAT; not shown.)
     LOG_INFO(Frontend,
-             "NX2_HEAP committed={} MiB tracked={} MiB in {} blocks (>= 64 KiB), dropped {}{}",
-             commit >> 20, tracked >> 20, blocks, dropped, force ? "" : " (moved)");
+             "NX2_HEAP large={} MiB (blocks >= 64 KiB, exact) small~{} MiB (sampled every ~256 KiB) "
+             "in {} entries, dropped {}{}",
+             tracked >> 20, sampled >> 20, blocks, dropped, force ? "" : " (moved)");
     for (size_t slot = 0; slot < 12 && top[slot].bytes != 0; ++slot) {
         std::string where;
         int shown = 0;
@@ -305,7 +360,7 @@ void Report(bool force) {
             where += " <- " + Describe(pc);
             ++shown;
         }
-        LOG_INFO(Frontend, "NX2_HEAP #{} {} MiB {}x{}", slot + 1, top[slot].bytes >> 20,
+        LOG_INFO(Frontend, "NX2_HEAP #{} {} MiB {} entries{}", slot + 1, top[slot].bytes >> 20,
                  top[slot].blocks, where);
     }
 }
@@ -326,6 +381,10 @@ struct Reporter {
                 {
                     Lock lock;
                     tracked = g_tracked_bytes;
+                }
+                {
+                    Lock lock;
+                    tracked += g_sampled_bytes;
                 }
                 const size_t moved = tracked > last ? tracked - last : last - tracked;
                 if (moved >= (size_t{64} << 20) || ++quiet >= 6) {

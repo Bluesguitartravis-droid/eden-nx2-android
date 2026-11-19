@@ -170,6 +170,10 @@ def patch(path, edits, marker):
         print(f"{path.name}: already patched")
         return
     for old, new in edits:
+        if old == "#include":
+            at = text.index("\n#include ") + 1
+            text = text[:at] + new + text[at:]
+            continue
         if text.count(old) != 1:
             sys.exit(f"{path.name}: expected one match for {old[:70]!r}, found {text.count(old)}")
         text = text.replace(old, new)
@@ -195,7 +199,7 @@ patch(vc / "texture_cache/texture_cache.h", [
     ("    runtime.CopyImage(slot_images[dst_slice->id], slot_images[src_slice->id],",
      "    const VideoCommon::Nx2CopyCensus::Scope nx2_census{VideoCommon::Nx2CopyCensus::Reason::Slice3D};\n"
      "    runtime.CopyImage(slot_images[dst_slice->id], slot_images[src_slice->id],"),
-    ("#pragma once\n", "#pragma once\n" + INC),
+    ("#include", INC),
 ], "Nx2CopyCensus")
 
 patch(vc / "renderer_vulkan/vk_texture_cache.cpp", [
@@ -213,7 +217,7 @@ patch(vc / "renderer_vulkan/vk_texture_cache.cpp", [
      "        return;\n"
      "    VideoCommon::Nx2CopyCensus::NoteCopy(dst, src, copies,\n"
      "                                         BytesPerBlock(src.info.format) != BytesPerBlock(dst.info.format));\n"),
-    ('#include "common/memory_detect.h"\n', '#include "common/memory_detect.h"\n' + INC),
+    ("#include", INC),
 ], "Nx2CopyCensus")
 
 patch(vc / "renderer_vulkan/vk_scheduler.cpp", [
@@ -222,6 +226,6 @@ patch(vc / "renderer_vulkan/vk_scheduler.cpp", [
      "    VideoCommon::Nx2CopyCensus::Report(seconds);\n"
      "    std::sort(ends.rbegin(), ends.rend());\n"
      "    for (size_t i = 0; i < ends.size() && i < 16; ++i) {"),
-    ("#include <source_location>\n", "#include <source_location>\n" + INC),
+    ("#include", INC),
 ], "Nx2CopyCensus")
 print("NX2 copy census added")

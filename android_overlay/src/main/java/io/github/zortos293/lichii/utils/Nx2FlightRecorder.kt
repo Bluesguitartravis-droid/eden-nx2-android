@@ -221,6 +221,15 @@ object Nx2FlightRecorder {
         surfaceViewRef = WeakReference(view)
     }
 
+    // For the Claude bridge (nx2/Nx2Bridge.kt): screenshots and the build tag.
+    fun bridgeSurface(): SurfaceView? = surfaceViewRef?.get()
+
+    fun bridgeActivity(): Activity? = activityRef?.get()?.takeIf { !it.isFinishing && !it.isDestroyed }
+
+    fun buildTag(): String = NX2_BUILD
+
+    fun bridgeSessionDir(): File? = currentSession
+
     fun resume(activity: Activity) {
         activityRef = WeakReference(activity)
         event("activity_resumed")

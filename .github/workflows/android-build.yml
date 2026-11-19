@@ -18,6 +18,7 @@ on:
       - "patches/**"
       - "scripts/**"
       - "android_overlay/**"
+      - "tools/**"
       - "README.md"
       - "docs/**"
 
@@ -91,10 +92,10 @@ jobs:
           # Lichii is zortos293's continuation of Eglantine nx2 (9a435b5 is an ancestor).
           git clone --recursive --branch nx2 --single-branch \
             https://github.com/zortos293/Lichii.git upstream
-          # dc9af208e: Lichii nx2 of 2026-11-14 09:29 UTC (170 commits after faa4bd13a, the base of
-          # builds 159-169). Lichii renamed the Kotlin package to io.github.zortos293.lichii; the
+          # 1d471c6fa: Lichii nx2 of 2026-11-17 23:49 UTC (303 commits after dc9af208e, the base of
+          # builds 170-192). Lichii renamed the Kotlin package to io.github.zortos293.lichii; the
           # applicationId (dev.eden.eden_emulator), so the app's data folder, is unchanged.
-          git -C upstream checkout dc9af208e
+          git -C upstream checkout 1d471c6fa
           # godpow's ARM64 macro JIT (Djihads80/Eglantine PR #503, from an Odin 3), with the
           # split front using it; EDEN_NX2_MME_JIT=0 goes back to the interpreter.
           git -C upstream -c user.name=ci -c user.email=ci@localhost \
@@ -103,7 +104,7 @@ jobs:
           # now: with them (131-136) Mario Kart World flashed blue and drew low-detail models.
           git -C upstream submodule update --init --recursive
           echo "NX2_COMMIT=$(git -C upstream rev-parse HEAD)" >> "$GITHUB_ENV"
-          echo "NX2_UPSTREAM=zortos293/Lichii:nx2@dc9af20+jit" >> "$GITHUB_ENV"
+          echo "NX2_UPSTREAM=zortos293/Lichii:nx2@1d471c6+jit" >> "$GITHUB_ENV"
           git -C upstream log -1 --oneline
 
       - name: Install host build tools
@@ -183,6 +184,22 @@ jobs:
       - name: Android mimalloc for operator new/delete
         shell: bash
         run: python3 scripts/apply-android-mimalloc.py upstream
+
+      - name: Name mimalloc memory for memory_breakdown
+        shell: bash
+        run: python3 scripts/apply-android-mimalloc-names.py upstream
+
+      - name: NX2_HEAP - log which code holds the emulator's C++ memory
+        shell: bash
+        run: python3 scripts/apply-nx2-heap-sites.py upstream
+
+      - name: Dynarmic keeps each compiled block's tables in compact lists (Ocarina ~6 GB)
+        shell: bash
+        run: python3 scripts/apply-nx2-dynarmic-compact-blocks.py upstream
+
+      - name: NX2_COPIES - log which image copies end render passes
+        shell: bash
+        run: python3 scripts/apply-nx2-copy-census.py upstream
 
       - name: Fastmem mapping diagnostics (NX2_HOSTMEM)
         shell: bash
@@ -304,6 +321,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-gmem-hoist.py upstream
 
+      - name: Pointer loads find their buffer once per pointer, not per load (Ocarina GPU cost)
+        shell: bash
+        run: python3 scripts/apply-nx2-gmem-route-cache.py upstream
+
       - name: Driver statistics per pipeline with EDEN_NX2_PIPELINE_STATS=1 (NX2_PSTATS)
         shell: bash
         run: python3 scripts/apply-nx2-pipeline-stats.py upstream
@@ -338,6 +359,31 @@ jobs:
           python3 -m py_compile scripts/apply-nx2-flight-recorder.py
           python3 scripts/apply-nx2-flight-recorder.py upstream "build-${{ github.run_number }}"
           grep -q 'object Nx2FlightRecorder' upstream/src/android/app/src/main/java/io/github/zortos293/lichii/utils/Nx2FlightRecorder.kt
+
+      - name: Set up Go (Claude Lab tunnel)
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache: false
+
+      - name: Build the Claude Lab tunnel (tools/nx2tunnel, ngrok-go, android/arm64)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd tools/nx2tunnel
+          go mod init github.com/Bluesguitartravis-droid/eden-nx2-android/tools/nx2tunnel
+          go get golang.ngrok.com/ngrok/v2@latest
+          go mod tidy
+          CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o "$RUNNER_TEMP/libnx2tunnel.so" .
+          file "$RUNNER_TEMP/libnx2tunnel.so" || true
+          grep 'golang.ngrok.com/ngrok/v2 ' go.mod
+
+      - name: Install Claude Lab (MCP bridge, Lab screen, restart helper)
+        shell: bash
+        run: |
+          python3 -m py_compile scripts/apply-nx2-claude-bridge.py
+          python3 scripts/apply-nx2-claude-bridge.py upstream "$RUNNER_TEMP/libnx2tunnel.so"
+          test -f upstream/src/android/app/src/main/jniLibs/arm64-v8a/libnx2tunnel.so
 
       - name: NCE opens pages with GPU-written bytes for writing without waiting
         shell: bash

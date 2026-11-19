@@ -34,6 +34,12 @@ new = """    static const bool nx2_run_network = [] {
     }
     return nx2_skipped;
 }"""
+# Lichii 2026-11-16 (#1985) skips the known passes itself whenever the network can't be shown
+# (the setting off, a replacement requested, resolution scaling, no support): the case this
+# patch was for. Upstream's rule is kept as is there.
+if "While the network can't be shown at all" in t:
+    print("Skipped: upstream skips the DLSS network passes itself (#1985)")
+    sys.exit(0)
 if "EDEN_NX2_DLSS_RUN_NETWORK" not in t:
     if old not in t:
         raise SystemExit("ProcessGameDlss tail not found")

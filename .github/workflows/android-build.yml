@@ -197,6 +197,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-dynarmic-compact-blocks.py upstream
 
+      - name: NX2_COPIES - log which image copies end render passes
+        shell: bash
+        run: python3 scripts/apply-nx2-copy-census.py upstream
+
       - name: Fastmem mapping diagnostics (NX2_HOSTMEM)
         shell: bash
         run: python3 scripts/apply-nx2-hostmem-diag.py upstream

@@ -488,6 +488,28 @@ internal object Nx2Tools {
         }
     }
 
+    /** The renderer's "Driver:" and "Device:" lines from the start of the current log. */
+    private fun gpuFromLog(context: Context): String? {
+        val file = nativeLog(context) ?: return null
+        if (!file.isFile) return null
+        val head = runCatching {
+            RandomAccessFile(file, "r").use { source ->
+                val data = ByteArray(minOf(source.length(), 4L shl 20).toInt())
+                source.readFully(data)
+                String(data, Charsets.UTF_8)
+            }
+        }.getOrNull() ?: return null
+        var device: String? = null
+        var driver: String? = null
+        for (line in head.lineSequence()) {
+            if (device == null) line.substringAfter("Render.Vulkan <Info>", "").substringAfter("Device: ", "").takeIf { it.isNotEmpty() }?.let { device = it.trim() }
+            if (driver == null) line.substringAfter("Render.Vulkan <Info>", "").substringAfter("Driver: ", "").takeIf { it.isNotEmpty() }?.let { driver = it.trim() }
+            if (device != null && driver != null) break
+        }
+        if (device == null) return null
+        return "gpu=" + device + " driver=" + (driver ?: "?")
+    }
+
     /** The log's own clock: "[  123.456789]" at the start of each line. */
     private fun logTime(line: String): Double? {
         val open = line.indexOf('[')
@@ -511,15 +533,11 @@ internal object Nx2Tools {
         if (isRunning) out.append(" paused=").append(runCatching { NativeLibrary.isPaused() }.getOrDefault(false))
         out.append('\n')
         out.append("last_game=").append(Nx2Bridge.lastGamePath() ?: "-").append('\n')
-        // Builds 193/194: asking for these creates a Vulkan instance, which crashed Eden natively
-        // when Android had restarted it in the background (no game screen). Only while a game
-        // runs; otherwise the last answer.
-        if (isRunning) {
-            runCatching {
-                gpuLine = "gpu=" + NativeLibrary.getGpuModel() + " driver=" +
-                    NativeLibrary.getGpuDriver() + " " + NativeLibrary.getVulkanDriverVersion()
-            }
-        }
+        // Builds 193/194/198: asking NativeLibrary for these loads Android's own Vulkan driver
+        // and creates an instance in Eden's process. With the game on Turnip, Eden crashed a few
+        // seconds later every time (198: twice in the pipeline-cache serialization thread). The
+        // renderer logs its device and driver at boot ("Driver: ...", "Device: ..."): read those.
+        if (isRunning) gpuFromLog(context)?.let { gpuLine = it }
         out.append(gpuLine ?: "gpu=(read while a game runs)").append('\n')
         out.append("per_game_settings_loaded=").append(runCatching { NativeConfig.isPerGameConfigLoaded() }.getOrDefault(false)).append('\n')
         for (key in listOf("resolution_setup", "oot_anti_aliasing", "anti_aliasing", "scaling_filter",

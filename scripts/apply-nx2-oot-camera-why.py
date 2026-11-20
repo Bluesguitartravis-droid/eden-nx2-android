@@ -6,8 +6,10 @@ in Hyrule Field at night every frame fell back to the game's 12 ms upscale with 
 this frame": TrackOcarinaCamera rejected every draw, silently. It now remembers the last reason it
 turned a draw down this frame (and the sizes involved), and the fallback line names it.
 
-EDEN_NX2_OOT_CAMERA_PADDING=1 lets FSR accept a scene drawn smaller than its target (up to 15
-pixels each way, as DLSS already does), in case the game's dynamic resolution is the reason.
+FSR also accepts a scene drawn up to 15 pixels smaller than its target, as DLSS already does: at
+night the game's dynamic resolution drops to 854x480 drawn into an 864x480 target, and FSR
+turned every such frame down (build 208, Lon Lon Ranch: with EDEN_NX2_OOT_CAMERA_PADDING=1 FSR
+ran 854x480 -> 1920x1080). EDEN_NX2_OOT_CAMERA_PADDING=0 turns that off.
 
 Usage: apply-nx2-oot-camera-why.py <upstream source root>
 """
@@ -46,7 +48,7 @@ void Nx2CameraReject(u64 frame, std::string reason) {
 bool Nx2CameraPadding() {
     static const bool enabled = [] {
         const char* value = std::getenv("EDEN_NX2_OOT_CAMERA_PADDING");
-        return value != nullptr && value[0] == '1';
+        return value == nullptr || value[0] != '0';
     }();
     return enabled;
 }

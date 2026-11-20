@@ -213,7 +213,7 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-pipeline-cache-save-fix.py upstream
 
-      - name: Ocarina FSR - name why a frame has no scene camera; optional padded scene
+      - name: Ocarina FSR - takes the night's 854x480 scene; names why a frame has no camera
         shell: bash
         run: python3 scripts/apply-nx2-oot-camera-why.py upstream
 

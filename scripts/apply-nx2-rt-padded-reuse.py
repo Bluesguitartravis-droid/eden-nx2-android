@@ -14,7 +14,8 @@ Now a render target first looks for a texture image (ImageFlagBits::Strong) at t
 the same format, height, samples, layers and block sizes, a smaller width and the same block-linear
 aligned size, and draws into that one. The texture keeps its own size, so sampling is unchanged;
 drawing is clipped to the texture's width, and the columns past it are padding no texture of that size
-can read. Switch: EDEN_NX2_RT_PADDED_REUSE=0 turns it off.
+can read. Off by default: build 204 on the Odin washed Ocarina's fog and light out white and did not
+change FPS. EDEN_NX2_RT_PADDED_REUSE=1 turns it on for experiments.
 
 Usage: apply-nx2-rt-padded-reuse.py <upstream source root>
 """
@@ -41,8 +42,9 @@ new = """    ImageId image_id{};
     // padded past a texture image at the same address draws into that texture image.
     const auto nx2_padded_texture = [&]() -> ImageId {
         static const bool enabled = [] {
+            // Off by default since build 204 washed Ocarina's fog and light out white.
             const char* value = std::getenv("EDEN_NX2_RT_PADDED_REUSE");
-            return !(value != nullptr && value[0] == '0');
+            return value != nullptr && value[0] == '1';
         }();
         if (!enabled || info.type != ImageType::e2D) {
             return ImageId{};

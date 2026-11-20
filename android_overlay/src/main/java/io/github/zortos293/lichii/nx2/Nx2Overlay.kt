@@ -356,6 +356,7 @@ object Nx2Overlay {
             val bubble = bubbleRef?.get() ?: return@post
             bubble.text = text
             bubble.visibility = View.VISIBLE
+            bubble.bringToFront()
             main.removeCallbacks(hideBubble)
             main.postDelayed(hideBubble, seconds.coerceIn(2, 60) * 1000L)
         }

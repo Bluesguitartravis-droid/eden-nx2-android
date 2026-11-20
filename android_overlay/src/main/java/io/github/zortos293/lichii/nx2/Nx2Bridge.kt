@@ -359,8 +359,9 @@ internal object Nx2Tools {
             "left|right, x?, y?, hold_ms?, wait_ms?}. At most 60 s in total.",
             schema(JSONObject().put("steps", JSONObject().put("type", "array")
                 .put("items", JSONObject().put("type", "object"))), listOf("steps")), false))
-        .put(tool("show_message", "Show a short message on the game screen for a few seconds " +
-            "(needs \"Show Claude in game\" on in Claude Lab).",
+        .put(tool("show_message", "Write to the player on the game screen: the message goes into the " +
+            "in-game chat panel and shows as a bubble for a few seconds (needs \"Show Claude in game\" " +
+            "on in Claude Lab). The player's replies are NX2_CHAT lines in the log.",
             schema(JSONObject()
                 .put("text", prop("string", "The message, one or two short lines"))
                 .put("seconds", prop("integer", "How long, default 6, 2..60")),
@@ -423,8 +424,15 @@ internal object Nx2Tools {
             "move_stick" -> text(moveStick(args.getString("stick"), args.getDouble("x"),
                 args.getDouble("y"), args.optLong("hold_ms", 500)))
             "input_sequence" -> text(sequence(args.getJSONArray("steps")))
-            "show_message" -> text(if (Nx2Overlay.showMessage(args.getString("text"), args.optInt("seconds", 6)))
-                "Shown" else "Not shown: no game on screen, or \"Show Claude in game\" is off")
+            // Build 204: the bubble alone was not seen on the Odin; the message also goes into the
+            // chat panel, which the player does see.
+            "show_message" -> {
+                val message = args.getString("text")
+                val panel = Nx2Overlay.say(message)
+                val bubble = Nx2Overlay.showMessage(message, args.optInt("seconds", 6))
+                text(if (panel || bubble) "Shown (chat panel and bubble)"
+                    else "Not shown: no game on screen, or \"Show Claude in game\" is off (kept in the chat)")
+            }
             "say" -> text(if (Nx2Overlay.say(args.getString("text"))) "Shown in the chat panel"
                 else "Saved in the chat, but the panel is not on screen (no game running, or " +
                     "\"Show Claude in game\" is off)")

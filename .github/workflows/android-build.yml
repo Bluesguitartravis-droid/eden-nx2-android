@@ -221,6 +221,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-defer-wfi.py upstream
 
+      - name: Depth buffers bound without depth/stencil writes stay unmodified (alias copies)
+        shell: bash
+        run: python3 scripts/apply-nx2-depth-write-modify.py upstream
+
       - name: Fastmem mapping diagnostics (NX2_HOSTMEM)
         shell: bash
         run: python3 scripts/apply-nx2-hostmem-diag.py upstream

@@ -205,6 +205,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-rt-padded-reuse.py upstream
 
+      - name: Android - a failed surface re-creation drops the frame (crash on app switch)
+        shell: bash
+        run: python3 scripts/apply-nx2-present-surface-retry.py upstream
+
       - name: Fastmem mapping diagnostics (NX2_HOSTMEM)
         shell: bash
         run: python3 scripts/apply-nx2-hostmem-diag.py upstream

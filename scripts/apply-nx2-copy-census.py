@@ -32,6 +32,7 @@ HEADER = r'''// SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "common/logging.h"
 #include "video_core/texture_cache/formatter.h"
+#include "video_core/texture_cache/image_base.h"
 
 namespace VideoCommon::Nx2CopyCensus {
 
@@ -65,6 +66,8 @@ struct Scope {
 struct Key {
     Reason reason;
     bool reinterpret;
+    bool src_texture;
+    bool dst_texture;
     VideoCore::Surface::PixelFormat src_format;
     VideoCore::Surface::PixelFormat dst_format;
     std::uint32_t src_width, src_height, src_layers;
@@ -107,6 +110,8 @@ inline void NoteCopy(const ImageT& dst, const ImageT& src, const CopiesT& copies
     Note(Key{
              .reason = g_reason,
              .reinterpret = reinterpret,
+             .src_texture = True(src.flags & VideoCommon::ImageFlagBits::Strong),
+             .dst_texture = True(dst.flags & VideoCommon::ImageFlagBits::Strong),
              .src_format = src.info.format,
              .dst_format = dst.info.format,
              .src_width = src.info.size.width,
@@ -151,10 +156,11 @@ inline void Report(double seconds) {
     for (std::size_t i = 0; i < entries.size() && i < 12; ++i) {
         const Key& k = entries[i].key;
         LOG_INFO(Render_Vulkan,
-                 "NX2_COPIES #{} {:.1f}/s {}{}: {} {}x{}x{} -> {} {}x{}x{}, region {}x{}, {:.1f} regions each",
+                 "NX2_COPIES #{} {:.1f}/s {}{}: {} {}x{}x{}{} -> {} {}x{}x{}{}, region {}x{}, {:.1f} regions each",
                  i + 1, static_cast<double>(entries[i].count) / seconds, ReasonName(k.reason),
                  k.reinterpret ? " reinterpret" : "", k.src_format, k.src_width, k.src_height,
-                 k.src_layers, k.dst_format, k.dst_width, k.dst_height, k.dst_layers, k.copy_width,
+                 k.src_layers, k.src_texture ? " (texture)" : "", k.dst_format, k.dst_width,
+                 k.dst_height, k.dst_layers, k.dst_texture ? " (texture)" : "", k.copy_width,
                  k.copy_height,
                  static_cast<double>(entries[i].regions) / static_cast<double>(entries[i].count));
     }

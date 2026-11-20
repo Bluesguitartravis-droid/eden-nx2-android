@@ -375,6 +375,19 @@ internal object Nx2Tools {
             schema(JSONObject().put("seconds", prop("integer", "5..50, default 45"))), true))
         .put(tool("chat_history", "The last messages of the in-game chat, oldest first.",
             schema(JSONObject().put("count", prop("integer", "Default 20, at most 200"))), true))
+        .put(tool("list_files", "Files under Eden's data folders (read-only view): root \"external\" " +
+            "(Android/data/<app>/files: log, shader cache, nx2 dumps) or \"internal\" (app files). " +
+            "Paths are relative to the root. Use with read_file to fetch e.g. EDEN_NX2_SHADER_DUMP output.",
+            schema(JSONObject()
+                .put("root", prop("string", "external (default) or internal"))
+                .put("path", prop("string", "Folder relative to the root, default the root itself"))), true))
+        .put(tool("read_file", "Read part of a file under Eden's data folders as base64 (at most 96 KiB a " +
+            "call). Returns size, offset, length and the data.",
+            schema(JSONObject()
+                .put("root", prop("string", "external (default) or internal"))
+                .put("path", prop("string", "File relative to the root"))
+                .put("offset", prop("integer", "Byte offset, default 0"))
+                .put("length", prop("integer", "Bytes, default and at most 98304")), listOf("path")), true))
         .put(tool("watch", "Watch the game for up to 50 s: frame rate, frame times, GPU load and " +
             "shader building every second, pictures of hitches or drops (up to two), marks the " +
             "player made meanwhile, and a screenshot at the end. Call it again and again to keep " +
@@ -456,6 +469,9 @@ internal object Nx2Tools {
             "get_mark" -> getMark(context, args.getString("id"))
             "notebook_read" -> text(notebook(context).let { if (it.isFile) it.readText() else "(empty)" })
             "notebook_append" -> text(notebookAppend(context, args.getString("text")))
+            "list_files" -> text(listFiles(context, args.optString("root", "external"), args.optString("path", "")))
+            "read_file" -> text(readFile(context, args.optString("root", "external"), args.getString("path"),
+                args.optLong("offset", 0L), args.optInt("length", 98304)))
             else -> error("Unknown tool $name")
         }
     } catch (failure: Exception) {
@@ -465,7 +481,7 @@ internal object Nx2Tools {
     /** Tools the Lab process (":nx2lab") answers by itself while Eden's own process is down:
      *  they only read or write files and settings, never the emulator. */
     val OFFLINE = setOf("status", "read_log", "last_exit", "list_marks", "get_mark", "notebook_read",
-        "notebook_append", "get_switches", "set_switches", "list_games")
+        "notebook_append", "get_switches", "set_switches", "list_games", "list_files", "read_file")
 
     fun callOffline(context: Context, name: String, args: JSONObject, why: String): JSONObject = try {
         when (name) {
@@ -478,6 +494,47 @@ internal object Nx2Tools {
         }
     } catch (failure: Exception) {
         error(failure.toString())
+    }
+
+    /** Eden's data folders for list_files / read_file; a path may not leave its root. */
+    private fun dataFile(context: Context, root: String, path: String): File {
+        val base = when (root) {
+            "internal" -> context.filesDir
+            else -> context.getExternalFilesDir(null) ?: throw IllegalStateException("No external files folder")
+        }.canonicalFile
+        val target = File(base, path.trimStart('/')).canonicalFile
+        if (target != base && !target.path.startsWith(base.path + File.separator)) {
+            throw IllegalArgumentException("$path is outside the $root folder")
+        }
+        return target
+    }
+
+    private fun listFiles(context: Context, root: String, path: String): String {
+        val dir = dataFile(context, root, path)
+        if (!dir.isDirectory) return "${dir.path} is not a folder"
+        val entries = dir.listFiles()?.sortedBy { it.name } ?: return "(cannot list ${dir.path})"
+        val out = StringBuilder("${dir.path} (${entries.size} entries)\n")
+        for (entry in entries.take(500)) {
+            out.append(if (entry.isDirectory) "d " else "f ").append(entry.name)
+            if (entry.isFile) out.append("  ").append(entry.length())
+            out.append('\n')
+        }
+        if (entries.size > 500) out.append("... ${entries.size - 500} more\n")
+        return out.toString()
+    }
+
+    private fun readFile(context: Context, root: String, path: String, offset: Long, length: Int): String {
+        val file = dataFile(context, root, path)
+        if (!file.isFile) return "${file.path} is not a file"
+        val size = file.length()
+        val start = offset.coerceIn(0L, size)
+        val count = minOf(length.coerceIn(1, 98304).toLong(), size - start).toInt()
+        val data = ByteArray(count)
+        java.io.RandomAccessFile(file, "r").use { source ->
+            source.seek(start)
+            source.readFully(data)
+        }
+        return "size=$size offset=$start length=$count\n" + Base64.encodeToString(data, Base64.NO_WRAP)
     }
 
     fun offlineStatus(context: Context, why: String): String {

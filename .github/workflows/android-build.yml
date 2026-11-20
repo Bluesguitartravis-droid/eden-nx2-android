@@ -217,6 +217,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-oot-camera-why.py upstream
 
+      - name: Guest wait-for-idle inside a render pass no longer ends it (EDEN_NX2_DEFER_WFI)
+        shell: bash
+        run: python3 scripts/apply-nx2-defer-wfi.py upstream
+
       - name: Fastmem mapping diagnostics (NX2_HOSTMEM)
         shell: bash
         run: python3 scripts/apply-nx2-hostmem-diag.py upstream

@@ -225,6 +225,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-depth-write-modify.py upstream
 
+      - name: Fragment shader math in fp16 with EDEN_NX2_RELAXED_FS=1 (experiment)
+        shell: bash
+        run: python3 scripts/apply-nx2-relaxed-fragment.py upstream
+
       - name: Fastmem mapping diagnostics (NX2_HOSTMEM)
         shell: bash
         run: python3 scripts/apply-nx2-hostmem-diag.py upstream

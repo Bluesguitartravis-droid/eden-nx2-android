@@ -365,6 +365,15 @@ internal object Nx2Tools {
                 .put("text", prop("string", "The message, one or two short lines"))
                 .put("seconds", prop("integer", "How long, default 6, 2..60")),
                 listOf("text")), false))
+        .put(tool("say", "Write to the player in the chat panel on the game screen (they read it " +
+            "while playing and can reply there). Keep it short. Use wait_for_player to read replies.",
+            schema(JSONObject().put("text", prop("string", "The message")), listOf("text")), false))
+        .put(tool("wait_for_player", "Wait up to 50 s for the player to write in the in-game chat " +
+            "or mark a moment; returns what they wrote (nothing if they did not). Call it again and " +
+            "again to keep the conversation going while they play.",
+            schema(JSONObject().put("seconds", prop("integer", "5..50, default 45"))), true))
+        .put(tool("chat_history", "The last messages of the in-game chat, oldest first.",
+            schema(JSONObject().put("count", prop("integer", "Default 20, at most 200"))), true))
         .put(tool("watch", "Watch the game for up to 50 s: frame rate, frame times, GPU load and " +
             "shader building every second, pictures of hitches or drops (up to two), marks the " +
             "player made meanwhile, and a screenshot at the end. Call it again and again to keep " +
@@ -416,6 +425,21 @@ internal object Nx2Tools {
             "input_sequence" -> text(sequence(args.getJSONArray("steps")))
             "show_message" -> text(if (Nx2Overlay.showMessage(args.getString("text"), args.optInt("seconds", 6)))
                 "Shown" else "Not shown: no game on screen, or \"Show Claude in game\" is off")
+            "say" -> text(if (Nx2Overlay.say(args.getString("text"))) "Shown in the chat panel"
+                else "Saved in the chat, but the panel is not on screen (no game running, or " +
+                    "\"Show Claude in game\" is off)")
+            "wait_for_player" -> {
+                Nx2Chat.load(context)
+                val seconds = args.optInt("seconds", 45).coerceIn(5, 50)
+                val got = Nx2Chat.waitForPlayer(seconds * 1000L)
+                text(if (got.isEmpty()) "Nothing from the player in $seconds s"
+                    else got.joinToString("\n") { Nx2Chat.format(it) })
+            }
+            "chat_history" -> {
+                Nx2Chat.load(context)
+                val recent = Nx2Chat.recent(args.optInt("count", 20).coerceIn(1, 200))
+                text(if (recent.isEmpty()) "(no messages yet)" else recent.joinToString("\n") { Nx2Chat.format(it) })
+            }
             "watch" -> watch(context, args.optInt("seconds", 30).coerceIn(5, 50), args.optBoolean("screenshot", true))
             "memory_breakdown" -> text(memoryBreakdown(args.optInt("top", 25).coerceIn(5, 80)))
             "last_exit" -> text(lastExit(context, args.optInt("count", 3).coerceIn(1, 10)))
@@ -502,8 +526,8 @@ internal object Nx2Tools {
         var device: String? = null
         var driver: String? = null
         for (line in head.lineSequence()) {
-            if (device == null) line.substringAfter("Render.Vulkan <Info>", "").substringAfter("Device: ", "").takeIf { it.isNotEmpty() }?.let { device = it.trim() }
-            if (driver == null) line.substringAfter("Render.Vulkan <Info>", "").substringAfter("Driver: ", "").takeIf { it.isNotEmpty() }?.let { driver = it.trim() }
+            if (device == null) line.substringAfter(":Report: Device: ", "").takeIf { it.isNotEmpty() }?.let { device = it.trim() }
+            if (driver == null) line.substringAfter(":Report: Driver: ", "").takeIf { it.isNotEmpty() }?.let { driver = it.trim() }
             if (device != null && driver != null) break
         }
         if (device == null) return null

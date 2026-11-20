@@ -209,6 +209,14 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-present-surface-retry.py upstream
 
+      - name: Pipeline cache saves copy their path (crash in SerializeVulkanPipelineCache)
+        shell: bash
+        run: python3 scripts/apply-nx2-pipeline-cache-save-fix.py upstream
+
+      - name: Ocarina FSR - name why a frame has no scene camera; optional padded scene
+        shell: bash
+        run: python3 scripts/apply-nx2-oot-camera-why.py upstream
+
       - name: Fastmem mapping diagnostics (NX2_HOSTMEM)
         shell: bash
         run: python3 scripts/apply-nx2-hostmem-diag.py upstream

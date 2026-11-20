@@ -380,7 +380,8 @@ internal object Nx2Tools {
             "Paths are relative to the root. Use with read_file to fetch e.g. EDEN_NX2_SHADER_DUMP output.",
             schema(JSONObject()
                 .put("root", prop("string", "external (default) or internal"))
-                .put("path", prop("string", "Folder relative to the root, default the root itself"))), true))
+                .put("path", prop("string", "Folder relative to the root, default the root itself"))
+                .put("match", prop("string", "Only names containing this text (e.g. -cs-11487d5300)"))), true))
         .put(tool("read_file", "Read part of a file under Eden's data folders as base64 (at most 96 KiB a " +
             "call). Returns size, offset, length and the data.",
             schema(JSONObject()
@@ -469,7 +470,8 @@ internal object Nx2Tools {
             "get_mark" -> getMark(context, args.getString("id"))
             "notebook_read" -> text(notebook(context).let { if (it.isFile) it.readText() else "(empty)" })
             "notebook_append" -> text(notebookAppend(context, args.getString("text")))
-            "list_files" -> text(listFiles(context, args.optString("root", "external"), args.optString("path", "")))
+            "list_files" -> text(listFiles(context, args.optString("root", "external"), args.optString("path", ""),
+                args.optString("match", "")))
             "read_file" -> text(readFile(context, args.optString("root", "external"), args.getString("path"),
                 args.optLong("offset", 0L), args.optInt("length", 98304)))
             else -> error("Unknown tool $name")
@@ -509,10 +511,11 @@ internal object Nx2Tools {
         return target
     }
 
-    private fun listFiles(context: Context, root: String, path: String): String {
+    private fun listFiles(context: Context, root: String, path: String, match: String): String {
         val dir = dataFile(context, root, path)
         if (!dir.isDirectory) return "${dir.path} is not a folder"
-        val entries = dir.listFiles()?.sortedBy { it.name } ?: return "(cannot list ${dir.path})"
+        val entries = dir.listFiles()?.filter { match.isEmpty() || it.name.contains(match) }
+            ?.sortedBy { it.name } ?: return "(cannot list ${dir.path})"
         val out = StringBuilder("${dir.path} (${entries.size} entries)\n")
         for (entry in entries.take(500)) {
             out.append(if (entry.isDirectory) "d " else "f ").append(entry.name)

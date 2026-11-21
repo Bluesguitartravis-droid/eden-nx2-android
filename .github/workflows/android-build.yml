@@ -243,6 +243,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-sign-bit-float-ops.py upstream
 
+      - name: Equal/mask acquires on the syncpoint shim or mirror shadow (count; EDEN_NX2_SHIM_ACQUIRE_PASS)
+        shell: bash
+        run: python3 scripts/apply-nx2-shim-acquires.py upstream
+
       - name: Fastmem mapping diagnostics (NX2_HOSTMEM)
         shell: bash
         run: python3 scripts/apply-nx2-hostmem-diag.py upstream

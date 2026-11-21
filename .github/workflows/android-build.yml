@@ -229,6 +229,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-relaxed-fragment.py upstream
 
+      - name: Pointer loads read their buffers' bases once per invocation (routed helpers, Ocarina VS cost)
+        shell: bash
+        run: python3 scripts/apply-nx2-gmem-hoist2.py upstream
+
       - name: Fastmem mapping diagnostics (NX2_HOSTMEM)
         shell: bash
         run: python3 scripts/apply-nx2-hostmem-diag.py upstream

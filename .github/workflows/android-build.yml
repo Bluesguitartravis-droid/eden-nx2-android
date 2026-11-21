@@ -233,6 +233,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-gmem-hoist2.py upstream
 
+      - name: Sign-bit integer ops read as floats become float negate/abs (EDEN_NX2_SIGN_FLOAT_OPS)
+        shell: bash
+        run: python3 scripts/apply-nx2-sign-bit-float-ops.py upstream
+
       - name: Fastmem mapping diagnostics (NX2_HOSTMEM)
         shell: bash
         run: python3 scripts/apply-nx2-hostmem-diag.py upstream

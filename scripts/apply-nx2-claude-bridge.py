@@ -120,6 +120,28 @@ patch("AndroidManifest.xml",
       "        </service>\n"
       "    </application>\n")
 
+# install_build: Claude installs a new test build itself (Nx2Updater.kt). The receiver runs in the
+# connection's process and starts the connection again after Eden's own update.
+patch("AndroidManifest.xml",
+      "    </application>\n",
+      "        <receiver\n"
+      "            android:name=\"io.github.zortos293.lichii.nx2.Nx2UpdateReceiver\"\n"
+      "            android:exported=\"true\"\n"
+      "            android:process=\":nx2lab\">\n"
+      "            <intent-filter>\n"
+      "                <action android:name=\"android.intent.action.MY_PACKAGE_REPLACED\" />\n"
+      "            </intent-filter>\n"
+      "        </receiver>\n"
+      "    </application>\n", mark="Nx2UpdateReceiver")
+patch("AndroidManifest.xml",
+      "    <uses-permission android:name=\"android.permission.REQUEST_INSTALL_PACKAGES\" />\n",
+      "    <uses-permission android:name=\"android.permission.REQUEST_INSTALL_PACKAGES\" />\n"
+      "    <!-- Claude Lab: updates without a prompt once Eden installed itself (Android 12+), and\n"
+      "         launch_game from the background when the player allows \"Display over other apps\". -->\n"
+      "    <uses-permission android:name=\"android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION\" />\n"
+      "    <uses-permission android:name=\"android.permission.SYSTEM_ALERT_WINDOW\" />\n",
+      mark="UPDATE_PACKAGES_WITHOUT_USER_ACTION")
+
 patch("res/values/strings.xml",
       "</resources>",
       "    <!-- " + MARK + " -->\n"

@@ -410,6 +410,14 @@ internal object Nx2Tools {
             "first): id, time, note.", schema(), true))
         .put(tool("get_mark", "A marked moment's full-size screenshot and note.",
             schema(JSONObject().put("id", prop("string", "Mark id from list_marks")), listOf("id")), true))
+        .put(tool("install_build", "Download a test build of Eden from the eden-nx2-android GitHub " +
+            "releases (lichii-test-<n>) and install it over this one. Eden and this connection stop while " +
+            "Android installs and come back by themselves after ~20-60 s; then check update_status and " +
+            "status. The first time, the player has to allow it on the device.",
+            schema(JSONObject().put("build", prop("string", "Build number, e.g. 215, or latest")),
+                listOf("build")), false))
+        .put(tool("update_status", "What the last install_build runs did (downloaded, waiting for the " +
+            "player, installed, failed) and when Eden was last updated.", schema(), true))
         .put(tool("notebook_read", "The lab notebook kept on the device between sessions.", schema(), true))
         .put(tool("notebook_append", "Add a dated entry to the lab notebook (findings, measurements, " +
             "suggestions for code changes).",
@@ -467,6 +475,8 @@ internal object Nx2Tools {
             "last_exit" -> text(lastExit(context, args.optInt("count", 3).coerceIn(1, 10)))
             "recent_frames" -> recentFrames(args.optInt("count", 4).coerceIn(1, 12))
             "list_marks" -> text(listMarks(context))
+            "install_build" -> text(Nx2Updater.install(context, args.optString("build", "latest")))
+            "update_status" -> text(Nx2Updater.status(context))
             "get_mark" -> getMark(context, args.getString("id"))
             "notebook_read" -> text(notebook(context).let { if (it.isFile) it.readText() else "(empty)" })
             "notebook_append" -> text(notebookAppend(context, args.getString("text")))
@@ -483,7 +493,8 @@ internal object Nx2Tools {
     /** Tools the Lab process (":nx2lab") answers by itself while Eden's own process is down:
      *  they only read or write files and settings, never the emulator. */
     val OFFLINE = setOf("status", "read_log", "last_exit", "list_marks", "get_mark", "notebook_read",
-        "notebook_append", "get_switches", "set_switches", "list_games", "list_files", "read_file")
+        "notebook_append", "get_switches", "set_switches", "list_games", "list_files", "read_file",
+        "install_build", "update_status")
 
     fun callOffline(context: Context, name: String, args: JSONObject, why: String): JSONObject = try {
         when (name) {

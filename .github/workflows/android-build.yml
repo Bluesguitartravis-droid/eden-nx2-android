@@ -246,6 +246,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-shadow-release-notes.py upstream
 
+      - name: Unmet acquires suspend without draining the back (EDEN_NX2_LAZY_SUSPEND)
+        shell: bash
+        run: python3 scripts/apply-nx2-lazy-suspend.py upstream
+
       - name: Fastmem mapping diagnostics (NX2_HOSTMEM)
         shell: bash
         run: python3 scripts/apply-nx2-hostmem-diag.py upstream

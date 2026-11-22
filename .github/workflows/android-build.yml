@@ -247,6 +247,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-shim-acquires.py upstream
 
+      - name: Mirrored releases into diverted words noted with their value (EDEN_NX2_SHIM_ACQUIRE_PASS)
+        shell: bash
+        run: python3 scripts/apply-nx2-shadow-release-notes.py upstream
+
       - name: Fastmem mapping diagnostics (NX2_HOSTMEM)
         shell: bash
         run: python3 scripts/apply-nx2-hostmem-diag.py upstream

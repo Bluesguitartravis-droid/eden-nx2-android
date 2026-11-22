@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""EDEN_NX2_CLEAR_NEW_PASS=1: a full depth/stencil clear that arrives inside an active render pass ends
+"""EDEN_NX2_CLEAR_NEW_PASS (on unless =0): a full depth/stencil clear that arrives inside an active render pass ends
 the pass and becomes the next pass's loadOp=CLEAR, instead of vkCmdClearAttachments.
 
 Turnip disables LRZ (its low-resolution depth buffer, early Z rejection) for the rest of a render
 pass when vkCmdClearAttachments clears depth: TU_DEBUG=perf on the Odin logged "Disabling LRZ because
 'CmdClearAttachments'" 766 times in the first ~1,200 lines in Hyrule Field, the most common reason.
 A pass break costs a store/load of the attachments; LRZ saves the shading of hidden fragments.
-Always on: an NX2_CLEARS line every 10 s counts mid-pass depth clears and how many were turned into
+228 on the Odin, ranch street by day, same spot: 13.6-13.7 fps off, 14.6-14.7 fps on (~1,870 clears
+per 10 s moved, 0 left in a pass), GPU busy 71-73 % both. Always: an NX2_CLEARS line every 10 s counts mid-pass depth clears and how many were turned into
 a new pass."""
 from pathlib import Path
 import sys
@@ -28,7 +29,7 @@ edit("void RasterizerVulkan::Clear(u32 layer_count) {", """namespace {
 bool Nx2ClearNewPass() {
     static const bool enabled = [] {
         const char* const value = std::getenv("EDEN_NX2_CLEAR_NEW_PASS");
-        return value != nullptr && value[0] == '1';
+        return value == nullptr || value[0] != '0'; // On unless EDEN_NX2_CLEAR_NEW_PASS=0
     }();
     return enabled;
 }

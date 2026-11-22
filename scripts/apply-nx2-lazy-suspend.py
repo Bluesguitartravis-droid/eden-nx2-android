@@ -64,6 +64,9 @@ new_fences = """        if (lazy) {
             // After the work queued before the acquire, without waiting for it here.
             OnBack([rasterizer = dma_pusher.rasterizer] { rasterizer->ReleaseFences(); },
                    FenceWrites);
+            // Sent now, not when the batch fills: the guest CPU may wait on what this releases
+            // before it sends the release the acquire waits for (222 hung at boot without it).
+            VideoCommon::GpuSplit::Get().Publish();
             pending_acquire = acquire;
             dma_pusher.suspensions.fetch_add(1, std::memory_order_release);
             VideoCommon::Nx2Profile::Add(VideoCommon::Nx2Profile::Counter::AcquireWaits, 1);

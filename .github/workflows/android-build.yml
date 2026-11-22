@@ -258,10 +258,6 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-settled-not-met.py upstream
 
-      - name: NCE is the default CPU backend again (Lichii #2246 made it Dynarmic)
-        shell: bash
-        run: python3 scripts/apply-nx2-nce-default.py upstream
-
       - name: Fastmem mapping diagnostics (NX2_HOSTMEM)
         shell: bash
         run: python3 scripts/apply-nx2-hostmem-diag.py upstream

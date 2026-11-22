@@ -338,6 +338,8 @@ internal object Nx2Tools {
         .put(tool("restart_app", "Restart Eden (switches and restart-only settings take effect), " +
             "then start the last game again unless relaunch_game is false.",
             schema(JSONObject().put("relaunch_game", prop("boolean", "Default true"))), false))
+        .put(tool("exit_game", "Exit the running game to Eden's game list, as the in-game Exit does " +
+            "(Eden keeps running). Use between tests instead of restart_app.", schema(), false))
         .put(tool("pause", "Pause or resume emulation.",
             schema(JSONObject().put("paused", prop("boolean", "true pauses, false resumes")),
                 listOf("paused")), false))
@@ -440,6 +442,7 @@ internal object Nx2Tools {
             "list_games" -> text(listGames(context).toString(2))
             "launch_game" -> text(launchGame(context, args.getString("query")))
             "restart_app" -> text(restartApp(context, args.optBoolean("relaunch_game", true)))
+            "exit_game" -> text(exitGame())
             "pause" -> text(pause(args.getBoolean("paused")))
             "screenshot" -> screenshot(args.optInt("width", 960).coerceIn(160, 1920))
             "press" -> text(press(args.getJSONArray("buttons"), args.optLong("hold_ms", 120)))
@@ -908,6 +911,16 @@ internal object Nx2Tools {
         Nx2RestartActivity.restart(context, target, Process.myPid())
         return "Restarting Eden" + (if (relaunch && path != null) " and the last game" else "") +
             ". The connector is back in about 10 s; the game needs longer to boot."
+    }
+
+    /** Stops emulation; EmulationActivity.onEmulationStopped(0) finishes back to the game list. */
+    private fun exitGame(): String {
+        if (!running()) return "No game running"
+        runCatching { NativeLibrary.stopEmulation() }.onFailure { return "Could not stop: ${it.message}" }
+        val deadline = System.currentTimeMillis() + 10000
+        while (running() && System.currentTimeMillis() < deadline) Thread.sleep(100)
+        return if (running()) "Asked the game to stop; it is still shutting down"
+        else "Exited the game; Eden is at its game list"
     }
 
     private fun pause(paused: Boolean): String {

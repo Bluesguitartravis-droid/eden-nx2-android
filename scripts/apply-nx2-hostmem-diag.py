@@ -56,6 +56,12 @@ unmap_new = '''        if (merged_size == 0) {
             }
         }
 '''
+# Lichii after 2026-11-20 maps without AdjustMap's clipping (no intended_offset, no
+# virtual_map_base): log the asked offset as given.
+if "intended_offset" not in t:
+    map_new = map_new.replace("intended_offset", "virtual_offset")
+if "virtual_map_base" not in t:
+    map_new = map_new.replace(" vmap={}", "").replace(", fmt::ptr(virtual_map_base)", "")
 for old, new, what in ((map_old, map_new, "Map"), (unmap_old, unmap_new, "Unmap")):
     if old not in t:
         raise SystemExit(f"host_memory.cpp: {what} mmap block shape changed")

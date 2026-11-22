@@ -258,6 +258,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-settled-not-met.py upstream
 
+      - name: In-pass depth clears can start a new pass (EDEN_NX2_CLEAR_NEW_PASS, keeps Turnip's LRZ)
+        shell: bash
+        run: python3 scripts/apply-nx2-clear-new-pass.py upstream
+
       - name: Fastmem mapping diagnostics (NX2_HOSTMEM)
         shell: bash
         run: python3 scripts/apply-nx2-hostmem-diag.py upstream

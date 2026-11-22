@@ -40,9 +40,25 @@ new = """    if (memory.InvalidateNCE(addr, Memory::LICHII_PAGESIZE)) {
     // We couldn't handle the access.
     return HandleFailedGuestFault(guest_ctx, raw_info, raw_context);
 }"""
+# Lichii after 2026-11-20: the Android branch sits under #ifndef __ANDROID__ ... #else.
+old_android = """    if (memory.InvalidateNCE(addr, Memory::LICHII_PAGESIZE)) {
+        // We handled the access successfully and are returning to guest code.
+        return true;
+    }
+#endif
+
+    // We couldn't handle the access.
+    return HandleFailedGuestFault(guest_ctx, raw_info, raw_context);
+}"""
+new_android = new.replace("""    // We couldn't handle the access.""", """#endif
+
+    // We couldn't handle the access.""", 1)
 if "loads read zero, stores are dropped" not in t:
-    if old not in t:
+    if old in t:
+        t = t.replace(old, new, 1)
+    elif old_android in t:
+        t = t.replace(old_android, new_android, 1)
+    else:
         raise SystemExit("HandleGuestAccessFault shape changed")
-    t = t.replace(old, new, 1)
     f.write_text(t)
 print("NCE unmapped accesses run through the interpreter")

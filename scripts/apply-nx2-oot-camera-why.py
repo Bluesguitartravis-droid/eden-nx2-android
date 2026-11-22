@@ -22,6 +22,26 @@ if "NX2 camera why" in text:
     print("vk_rasterizer.cpp: already patched")
     sys.exit(0)
 
+if "oot_camera_refusal" in text:
+    # Lichii after 2026-11-20 names the refusal itself ("no scene camera: its size does not match
+    # the scene target"); only FSR's padded night scene is left to allow.
+    old = """    const auto camera = VideoCommon::DecodeOcarinaCamera(
+        values, color.size.width, color.size.height,
+        oot_backend == VideoCommon::OcarinaUpscaleBackend::Dlss);"""
+    if text.count(old) != 1:
+        sys.exit("vk_rasterizer.cpp: DecodeOcarinaCamera call not found")
+    text = text.replace(old, """    // NX2 camera why: FSR takes the night's 854x480 scene in its 864x480 target too.
+    static const bool nx2_camera_padding = [] {
+        const char* value = std::getenv("EDEN_NX2_OOT_CAMERA_PADDING");
+        return value == nullptr || value[0] != '0';
+    }();
+    const auto camera = VideoCommon::DecodeOcarinaCamera(
+        values, color.size.width, color.size.height,
+        oot_backend == VideoCommon::OcarinaUpscaleBackend::Dlss || nx2_camera_padding);""")
+    path.write_text(text)
+    print("vk_rasterizer.cpp: FSR accepts a padded scene (upstream names the refusals itself)")
+    sys.exit(0)
+
 
 def replace(old, new):
     global text

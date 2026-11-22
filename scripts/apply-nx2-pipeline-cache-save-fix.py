@@ -58,9 +58,22 @@ edits = [
     serialization_thread.WaitForRequests();
     save();"""),
 ]
+# Lichii after 2026-11-20 (#2331): the post-precache save also runs an after_save callback.
+edits.append(("""    const auto save = [this, after_save = std::move(after_save)] {
+        if (!SerializeVulkanPipelineCache(vulkan_pipeline_cache_filename, vulkan_pipeline_cache,
+                                          CACHE_VERSION)) {""",
+              """    const auto save = [this, after_save = std::move(after_save),
+                       filename = vulkan_pipeline_cache_filename] {
+        if (!SerializeVulkanPipelineCache(filename, vulkan_pipeline_cache, CACHE_VERSION)) {"""))
+applied = 0
 for old, new in edits:
-    if text.count(old) != 1:
-        sys.exit(f"vk_pipeline_cache.cpp: expected one match for {old[:60]!r}, found {text.count(old)}")
-    text = text.replace(old, new)
+    count = text.count(old)
+    if count > 1:
+        sys.exit(f"vk_pipeline_cache.cpp: expected one match for {old[:60]!r}, found {count}")
+    if count == 1:
+        text = text.replace(old, new)
+        applied += 1
+if applied != 3:
+    sys.exit(f"vk_pipeline_cache.cpp: {applied} of the 3 changes found a match")
 path.write_text(text)
 print("vk_pipeline_cache.cpp: pipeline cache saves copy their path; post-precache save runs inline")

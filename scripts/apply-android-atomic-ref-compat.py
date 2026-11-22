@@ -95,7 +95,9 @@ import re
 pattern = re.compile(
     r"std::atomic_ref<(u32|u64|std::uint32_t|std::uint64_t)>\{([^{}]+)\}\.load\(std::memory_order_(relaxed|acquire|seq_cst)\)")
 for path in sorted((root / "src").rglob("*")):
-    if path.suffix not in (".h", ".cpp") or "tests" in path.parts or "dynarmic" in path.parts:
+    # core/arm/hypervisor is the macOS Hypervisor.framework backend (HAS_HYPERVISOR): not built here.
+    if (path.suffix not in (".h", ".cpp") or "tests" in path.parts or "dynarmic" in path.parts
+            or "hypervisor" in path.parts):
         continue
     text = path.read_text(errors="ignore")
     if "std::atomic_ref" not in text:

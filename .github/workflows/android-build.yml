@@ -92,16 +92,11 @@ jobs:
           # Lichii is zortos293's continuation of Eglantine nx2 (9a435b5 is an ancestor).
           git clone --recursive --branch nx2 --single-branch \
             https://github.com/zortos293/Lichii.git upstream
-          # 1d471c6fa: Lichii nx2 of 2026-11-17 23:49 UTC (303 commits after dc9af208e, the base of
-          # builds 170-192). Lichii renamed the Kotlin package to io.github.zortos293.lichii; the
-          # applicationId (dev.eden.eden_emulator), so the app's data folder, is unchanged.
-          git -C upstream checkout 1d471c6fa
-          # Lichii's later GPU split work (2026-11-17..20, #2143 series, #2160, #2237, #2247):
-          # equal/mask semaphore acquires pass on what their word settles at instead of draining
-          # the split (Ocarina at Lon Lon Ranch drained ~8,400 acquires/s on 216, the front
-          # waiting ~200-300 ms/s for the back), and the front sleeps instead of spinning.
-          git -C upstream -c user.name=ci -c user.email=ci@localhost \
-            am --3way "$GITHUB_WORKSPACE/patches/upstream-split-acquires.patch"
+          # 8b84a70d: Lichii nx2 of 2026-11-22 02:35 UTC (165 commits after 1d471c6fa, the base of
+          # builds 193-219; includes the GPU split acquire work #2143 that 217-219 cherry-picked).
+          # Lichii renamed the Kotlin package to io.github.zortos293.lichii; the applicationId
+          # (dev.eden.eden_emulator), so the app's data folder, is unchanged.
+          git -C upstream checkout 8b84a70d
           # godpow's ARM64 macro JIT (Djihads80/Eglantine PR #503, from an Odin 3), with the
           # split front using it; EDEN_NX2_MME_JIT=0 goes back to the interpreter.
           git -C upstream -c user.name=ci -c user.email=ci@localhost \
@@ -110,7 +105,7 @@ jobs:
           # now: with them (131-136) Mario Kart World flashed blue and drew low-detail models.
           git -C upstream submodule update --init --recursive
           echo "NX2_COMMIT=$(git -C upstream rev-parse HEAD)" >> "$GITHUB_ENV"
-          echo "NX2_UPSTREAM=zortos293/Lichii:nx2@1d471c6+split-acquires+jit" >> "$GITHUB_ENV"
+          echo "NX2_UPSTREAM=zortos293/Lichii:nx2@8b84a70+jit" >> "$GITHUB_ENV"
           git -C upstream log -1 --oneline
 
       - name: Install host build tools

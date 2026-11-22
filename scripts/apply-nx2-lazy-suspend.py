@@ -10,7 +10,8 @@ front until the back has caught up, which serializes the two halves of the split
 With the switch the fences are released on the back instead (asynchronously, after the work
 queued before the acquire), the waiter is registered first as before, and the channel suspends.
 CanResumeAcquire still drains at most once per 1 ms for a waiting acquire (the existing valve),
-so work only a drain lands is at most that late. Acquires found Drain (a write the front cannot
+so work only a drain lands is at most that late, and with this switch that drain also releases
+the fences. Acquires found Drain (a write the front cannot
 see) keep the drain."""
 from pathlib import Path
 import sys
@@ -67,6 +68,13 @@ new_fences = """        if (lazy) {
             // Sent now, not when the batch fills: the guest CPU may wait on what this releases
             // before it sends the release the acquire waits for (222 hung at boot without it).
             VideoCommon::GpuSplit::Get().Publish();
+            // A release that landed before the waiter was added latches nothing.
+            if (waiters.Latched(this) ||
+                acquire.Matches(ReadSemaphoreWord(dma_pusher, acquire.address))) {
+                waiters.Remove(this);
+                VideoCommon::Nx2FastDraw::NoteSync();
+                return;
+            }
             pending_acquire = acquire;
             dma_pusher.suspensions.fetch_add(1, std::memory_order_release);
             VideoCommon::Nx2Profile::Add(VideoCommon::Nx2Profile::Counter::AcquireWaits, 1);
@@ -74,7 +82,15 @@ new_fences = """        if (lazy) {
         }
         ReleaseFences(dma_pusher);
         if (!waiters.Latched(this) && !acquire.Matches(ReadSemaphoreWord(dma_pusher, acquire.address))) {"""
-for old, new in ((old_drain, new_drain), (old_fences, new_fences)):
+# The fenced releases (query reports with a fence) run only when the fences are released. The
+# immediate path releases them after a drain; a lazily suspended acquire releases them with the
+# 1 ms valve's drain instead (223 hung at boot without this: the guest CPU spun on a fenced write).
+old_valve = """    if (const auto now = std::chrono::steady_clock::now();
+        delayed && now - pending_acquire->last_fences >= std::chrono::milliseconds{1}) {"""
+new_valve = """    if (const auto now = std::chrono::steady_clock::now();
+        (delayed || Nx2LazySuspend()) &&
+        now - pending_acquire->last_fences >= std::chrono::milliseconds{1}) {"""
+for old, new in ((old_drain, new_drain), (old_fences, new_fences), (old_valve, new_valve)):
     if t.count(old) != 1:
         sys.exit(f"puller.cpp: expected one match for {old[:70]!r}, found {t.count(old)}")
     t = t.replace(old, new, 1)

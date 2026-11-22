@@ -254,6 +254,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-shadow-settle.py upstream
 
+      - name: Acquire switch defaults, settled unmet acquires (EDEN_NX2_SETTLED_NOT_MET)
+        shell: bash
+        run: python3 scripts/apply-nx2-settled-not-met.py upstream
+
       - name: Fastmem mapping diagnostics (NX2_HOSTMEM)
         shell: bash
         run: python3 scripts/apply-nx2-hostmem-diag.py upstream

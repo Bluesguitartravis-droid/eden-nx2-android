@@ -75,6 +75,17 @@ new_fences = """        if (lazy) {
                 VideoCommon::Nx2FastDraw::NoteSync();
                 return;
             }
+            // Which waits it takes (the first 300, then every 4096th): a hang names its acquire.
+            if (static std::atomic<u32> logged{}; logged.load(std::memory_order_relaxed) < 300 ||
+                (logged.load(std::memory_order_relaxed) & 4095) == 0) {
+                const u32 n = logged.fetch_add(1, std::memory_order_relaxed);
+                LOG_INFO(HW_GPU, "NX2 lazy suspend #{}: channel {} semaphore {:#x} op {} value {:#x} "
+                         "word {:#x}", n, dma_pusher.channel_state.bind_id, acquire.address,
+                         acquire.operation, acquire.value,
+                         ReadSemaphoreWord(dma_pusher, acquire.address));
+            } else {
+                logged.fetch_add(1, std::memory_order_relaxed);
+            }
             pending_acquire = acquire;
             dma_pusher.suspensions.fetch_add(1, std::memory_order_release);
             VideoCommon::Nx2Profile::Add(VideoCommon::Nx2Profile::Counter::AcquireWaits, 1);

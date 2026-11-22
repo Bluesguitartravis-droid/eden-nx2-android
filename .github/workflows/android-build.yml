@@ -262,6 +262,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-clear-new-pass.py upstream
 
+      - name: Frame trace totals every pass by extent and draw count (diagnostic)
+        shell: bash
+        run: python3 scripts/apply-nx2-pass-groups.py upstream
+
       - name: Fastmem mapping diagnostics (NX2_HOSTMEM)
         shell: bash
         run: python3 scripts/apply-nx2-hostmem-diag.py upstream

@@ -9,7 +9,10 @@ GPU ~72 % busy) at ~14-17 fps.
 
 EDEN_NX2_EARLY_FENCE_REPORTS=1 drops the fence bit from payload reports (their value is known when
 sent; written at once like other payload releases at low accuracy); =2 from every report (counters
-then follow the non-fence path). Measures the ceiling; expect visual errors with 2."""
+then follow the non-fence path). Measures the ceiling; expect visual errors with 2. Read again from
+the switches file every 2 s, so set_switches changes it without restarting Eden.
+
+232 at the ranch: ~1,090 fenced reports a second (~80 a frame), all payloads, no counters."""
 from pathlib import Path
 import sys
 
@@ -21,9 +24,34 @@ if "EDEN_NX2_EARLY_FENCE_REPORTS" in t:
 old = """    const bool is_fence = True(flags & QueryPropertiesFlags::IsAFence);
     const bool mirrored = True(flags & QueryPropertiesFlags::Nx2Mirror);"""
 new = """    // scripts/apply-nx2-early-fence-reports.py
-    static const int nx2_early_fence_reports = [] {
-        const char* const value = std::getenv("EDEN_NX2_EARLY_FENCE_REPORTS");
-        return value != nullptr ? std::atoi(value) : 0;
+    // Live: the switches file is read again every 2 s (set_switches works without a restart).
+    const int nx2_early_fence_reports = [] {
+        static std::mutex mutex;
+        static int value = [] {
+            const char* const env = std::getenv("EDEN_NX2_EARLY_FENCE_REPORTS");
+            return env != nullptr ? std::atoi(env) : 0;
+        }();
+        static std::chrono::steady_clock::time_point checked{};
+        std::scoped_lock lock{mutex};
+        const auto now = std::chrono::steady_clock::now();
+        if (now - checked >= std::chrono::seconds{2}) {
+            checked = now;
+            if (std::FILE* const file = std::fopen(
+                    "/storage/emulated/0/Android/data/dev.eden.eden_emulator/files/nx2_switches.txt",
+                    "r")) {
+                char line[256];
+                int found = 0;
+                while (std::fgets(line, sizeof(line), file) != nullptr) {
+                    constexpr char key[] = "EDEN_NX2_EARLY_FENCE_REPORTS=";
+                    if (std::strncmp(line, key, sizeof(key) - 1) == 0) {
+                        found = std::atoi(line + sizeof(key) - 1);
+                    }
+                }
+                std::fclose(file);
+                value = found;
+            }
+        }
+        return value;
     }();
     static std::atomic<u64> nx2_fenced_payload{}, nx2_fenced_counter{}, nx2_unfenced{};
     static std::atomic<s64> nx2_fence_report_at{};
@@ -48,7 +76,8 @@ new = """    // scripts/apply-nx2-early-fence-reports.py
 if t.count(old) != 1:
     sys.exit("query_cache.h: CounterReport's is_fence not found")
 t = t.replace(old, new, 1)
-for inc in ("#include <atomic>", "#include <chrono>", "#include <cstdlib>"):
+for inc in ("#include <atomic>", "#include <chrono>", "#include <cstdio>", "#include <cstdlib>",
+            "#include <cstring>", "#include <mutex>"):
     if inc not in t:
         t = t.replace("#pragma once\n", "#pragma once\n" + inc + "\n", 1)
 f.write_text(t)

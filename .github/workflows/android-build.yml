@@ -286,6 +286,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-pstats-ir.py upstream
 
+      - name: Live switch to drop the barrier before compute dispatches (EDEN_NX2_DISPATCH_BARRIER=0, measurement aid)
+        shell: bash
+        run: python3 scripts/apply-nx2-dispatch-barrier.py upstream
+
       - name: Fastmem mapping diagnostics (NX2_HOSTMEM)
         shell: bash
         run: python3 scripts/apply-nx2-hostmem-diag.py upstream

@@ -497,6 +497,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-cpu-backend-live.py upstream
 
+      - name: NX2_HANG dumps (core interrupts) only with EDEN_NX2_HANG_DUMP=1
+        shell: bash
+        run: python3 scripts/apply-nx2-hang-dump-optin.py upstream
+
       - name: Detect Android build requirements
         id: android_req
         shell: bash

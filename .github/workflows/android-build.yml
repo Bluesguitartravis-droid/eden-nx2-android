@@ -282,10 +282,6 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-mesh-hoist.py upstream
 
-      - name: Driver internal representations for EDEN_NX2_PSTATS_HASH pipelines (EDEN_NX2_PSTATS_IR, measurement aid)
-        shell: bash
-        run: python3 scripts/apply-nx2-pstats-ir.py upstream
-
       - name: Live switch to drop the barrier before compute dispatches (EDEN_NX2_DISPATCH_BARRIER=0, measurement aid)
         shell: bash
         run: python3 scripts/apply-nx2-dispatch-barrier.py upstream
@@ -417,6 +413,10 @@ jobs:
       - name: Driver statistics per pipeline with EDEN_NX2_PIPELINE_STATS=1 (NX2_PSTATS)
         shell: bash
         run: python3 scripts/apply-nx2-pipeline-stats.py upstream
+
+      - name: Driver internal representations for EDEN_NX2_PSTATS_HASH pipelines (EDEN_NX2_PSTATS_IR, measurement aid)
+        shell: bash
+        run: python3 scripts/apply-nx2-pstats-ir.py upstream
 
       - name: Shader precache and build-all-cached switches (EDEN_NX2_PRECACHE, EDEN_NX2_BUILD_ALL_CACHED)
         shell: bash

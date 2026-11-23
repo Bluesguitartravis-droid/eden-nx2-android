@@ -278,6 +278,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-skip-mesh.py upstream
 
+      - name: Hoist mesh emulation dispatches in front of the render pass (EDEN_NX2_MESH_HOIST, live)
+        shell: bash
+        run: python3 scripts/apply-nx2-mesh-hoist.py upstream
+
       - name: Fastmem mapping diagnostics (NX2_HOSTMEM)
         shell: bash
         run: python3 scripts/apply-nx2-hostmem-diag.py upstream

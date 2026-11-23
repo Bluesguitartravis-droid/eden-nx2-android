@@ -506,6 +506,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-contract.py upstream
 
+      - name: Live SVC trace of the next n presents (EDEN_NX2_SVC_TRACE_LIVE, measurement aid)
+        shell: bash
+        run: python3 scripts/apply-nx2-svc-trace-live.py upstream
+
       - name: Detect Android build requirements
         id: android_req
         shell: bash

@@ -501,6 +501,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-hang-dump-optin.py upstream
 
+      - name: NCE names undefined guest instructions; EDEN_NX2_NCE_SKIP_UNDEFINED=1 skips them
+        shell: bash
+        run: python3 scripts/apply-nx2-nce-undefined.py upstream
+
       - name: Detect Android build requirements
         id: android_req
         shell: bash

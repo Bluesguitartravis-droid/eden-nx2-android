@@ -282,6 +282,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-mesh-hoist.py upstream
 
+      - name: Driver internal representations for EDEN_NX2_PSTATS_HASH pipelines (EDEN_NX2_PSTATS_IR, measurement aid)
+        shell: bash
+        run: python3 scripts/apply-nx2-pstats-ir.py upstream
+
       - name: Fastmem mapping diagnostics (NX2_HOSTMEM)
         shell: bash
         run: python3 scripts/apply-nx2-hostmem-diag.py upstream

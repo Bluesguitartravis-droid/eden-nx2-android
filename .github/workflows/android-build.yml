@@ -274,6 +274,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-skip-shaders.py upstream
 
+      - name: Live mesh-draw skip for pricing mesh emulation (EDEN_NX2_SKIP_MESH, measurement aid)
+        shell: bash
+        run: python3 scripts/apply-nx2-skip-mesh.py upstream
+
       - name: Fastmem mapping diagnostics (NX2_HOSTMEM)
         shell: bash
         run: python3 scripts/apply-nx2-hostmem-diag.py upstream

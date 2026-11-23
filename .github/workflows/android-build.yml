@@ -502,6 +502,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-log-flush.py upstream
 
+      - name: Let the driver fuse float multiplies and adds (EDEN_NX2_CONTRACT=fs|all)
+        shell: bash
+        run: python3 scripts/apply-nx2-contract.py upstream
+
       - name: Detect Android build requirements
         id: android_req
         shell: bash

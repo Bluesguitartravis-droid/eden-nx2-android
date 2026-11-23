@@ -266,6 +266,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-pass-groups.py upstream
 
+      - name: Count fenced query reports; early-write test switch (EDEN_NX2_EARLY_FENCE_REPORTS)
+        shell: bash
+        run: python3 scripts/apply-nx2-early-fence-reports.py upstream
+
       - name: Fastmem mapping diagnostics (NX2_HOSTMEM)
         shell: bash
         run: python3 scripts/apply-nx2-hostmem-diag.py upstream

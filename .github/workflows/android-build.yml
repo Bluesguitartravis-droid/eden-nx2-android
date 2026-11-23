@@ -514,6 +514,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-display-depth.py upstream
 
+      - name: CPU backend from the switches file at each game boot (EDEN_NX2_CPU_BACKEND, measurement aid)
+        shell: bash
+        run: python3 scripts/apply-nx2-cpu-backend-live.py upstream
+
       - name: Detect Android build requirements
         id: android_req
         shell: bash

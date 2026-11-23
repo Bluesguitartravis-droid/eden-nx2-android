@@ -274,17 +274,8 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-skip-shaders.py upstream
 
-      - name: Live mesh-draw skip for pricing mesh emulation (EDEN_NX2_SKIP_MESH, measurement aid)
-        shell: bash
-        run: python3 scripts/apply-nx2-skip-mesh.py upstream
 
-      - name: Hoist mesh emulation dispatches in front of the render pass (EDEN_NX2_MESH_HOIST, live)
-        shell: bash
-        run: python3 scripts/apply-nx2-mesh-hoist.py upstream
 
-      - name: Live switch to drop the barrier before compute dispatches (EDEN_NX2_DISPATCH_BARRIER=0, measurement aid)
-        shell: bash
-        run: python3 scripts/apply-nx2-dispatch-barrier.py upstream
 
       - name: Fastmem mapping diagnostics (NX2_HOSTMEM)
         shell: bash
@@ -414,9 +405,6 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-pipeline-stats.py upstream
 
-      - name: Driver internal representations for EDEN_NX2_PSTATS_HASH pipelines (EDEN_NX2_PSTATS_IR, measurement aid)
-        shell: bash
-        run: python3 scripts/apply-nx2-pstats-ir.py upstream
 
       - name: Shader precache and build-all-cached switches (EDEN_NX2_PRECACHE, EDEN_NX2_BUILD_ALL_CACHED)
         shell: bash
@@ -502,17 +490,8 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-log-flush.py upstream
 
-      - name: Let the driver fuse float multiplies and adds (EDEN_NX2_CONTRACT, EDEN_NX2_NO_PRESERVE = fs|all)
-        shell: bash
-        run: python3 scripts/apply-nx2-contract.py upstream
 
-      - name: Live SVC trace of the next n presents (EDEN_NX2_SVC_TRACE_LIVE, measurement aid)
-        shell: bash
-        run: python3 scripts/apply-nx2-svc-trace-live.py upstream
 
-      - name: Live display queue depth for host-paced frames (EDEN_NX2_DISPLAY_DEPTH, measurement aid)
-        shell: bash
-        run: python3 scripts/apply-nx2-display-depth.py upstream
 
       - name: CPU backend from the switches file at each game boot (EDEN_NX2_CPU_BACKEND, measurement aid)
         shell: bash

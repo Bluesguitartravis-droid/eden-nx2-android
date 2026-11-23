@@ -505,6 +505,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-nce-undefined.py upstream
 
+      - name: NCE emulates counter reads that trap (CNTPCT/CNTVCT/CNTFRQ)
+        shell: bash
+        run: python3 scripts/apply-nx2-nce-counter-trap.py upstream
+
       - name: Detect Android build requirements
         id: android_req
         shell: bash

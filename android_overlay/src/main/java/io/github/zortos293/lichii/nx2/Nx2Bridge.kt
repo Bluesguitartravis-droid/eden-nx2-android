@@ -891,7 +891,7 @@ internal object Nx2Tools {
 
     private fun launchGame(context: Context, query: String): String {
         val game = findGame(context, query) ?: return "No game matches \"$query\" (see list_games)"
-        context.startActivity(Nx2Wake.prepare(context, gameIntent(context, game.getString("path"))))
+        context.startActivity(gameIntent(context, game.getString("path")))
         Nx2Bridge.rememberGame(game.getString("path"))
         return "Launching ${game.optString("title")}"
     }
@@ -908,7 +908,7 @@ internal object Nx2Tools {
             val deadline = System.currentTimeMillis() + 8000
             while (running() && System.currentTimeMillis() < deadline) Thread.sleep(100)
         }
-        Nx2RestartActivity.restart(context, Nx2Wake.prepare(context, target), Process.myPid())
+        Nx2RestartActivity.restart(context, target, Process.myPid())
         return "Restarting Eden" + (if (relaunch && path != null) " and the last game" else "") +
             ". The connector is back in about 10 s; the game needs longer to boot."
     }

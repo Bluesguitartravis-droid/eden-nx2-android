@@ -102,6 +102,36 @@ object Nx2Bridge {
 
     fun gameScreenHistory(): String = synchronized(gameScreenEvents) { gameScreenEvents.joinToString(" | ") }
 
+    /** Other apps' screens that came to the front in the last [windowMs] ms, newest last, from
+     *  UsageStatsManager. Needs "Usage access" for Eden (Settings > Apps > Special app access). */
+    fun recentForegroundApps(context: Context, windowMs: Long = 30_000): String = runCatching {
+        val appOps = context.getSystemService(android.app.AppOpsManager::class.java)
+        @Suppress("DEPRECATION")
+        val mode = appOps?.checkOpNoThrow(android.app.AppOpsManager.OPSTR_GET_USAGE_STATS,
+            android.os.Process.myUid(), context.packageName)
+        if (mode != android.app.AppOpsManager.MODE_ALLOWED) {
+            return "usage access not granted (Settings > Apps > Special app access > Usage access > Eden)"
+        }
+        val usage = context.getSystemService(android.app.usage.UsageStatsManager::class.java)
+            ?: return "no UsageStatsManager"
+        val now = System.currentTimeMillis()
+        val events = usage.queryEvents(now - windowMs, now)
+        val event = android.app.usage.UsageEvents.Event()
+        val seen = ArrayList<String>()
+        val format = java.text.SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
+        while (events.hasNextEvent()) {
+            events.getNextEvent(event)
+            val kind = when (event.eventType) {
+                android.app.usage.UsageEvents.Event.ACTIVITY_RESUMED -> "resumed"
+                android.app.usage.UsageEvents.Event.ACTIVITY_PAUSED -> "paused"
+                else -> continue
+            }
+            seen.add(format.format(java.util.Date(event.timeStamp)) + " " + kind + " " +
+                event.packageName + "/" + (event.className?.substringAfterLast('.') ?: "?"))
+        }
+        if (seen.isEmpty()) "no activity changes" else seen.takeLast(16).joinToString(" | ")
+    }.getOrElse { "failed: ${it.javaClass.simpleName}: ${it.message}" }
+
     /** Frame statistics since the last call (NX2 Claude Lab window in nx2_session.h). */
     @JvmStatic external fun nativeLiveFrames(): String
 
@@ -671,6 +701,7 @@ internal object Nx2Tools {
         out.append(gpuLine ?: "gpu=(read while a game runs)").append('\n')
         out.append("game_screen=").append(if (Nx2Bridge.gameScreenResumed) "in front" else "not in front")
             .append(" [").append(Nx2Bridge.gameScreenHistory()).append("]\n")
+        out.append("front_apps_30s=").append(Nx2Bridge.recentForegroundApps(context)).append('\n')
         val gameConfig = lastGameConfig(context)
         out.append("game_settings=").append(when {
             gameConfig == null -> "-"
@@ -999,6 +1030,9 @@ internal object Nx2Tools {
             for (delay in longArrayOf(3000, 3000, 4000, 5000)) {
                 Thread.sleep(delay)
                 if (Nx2Bridge.gameScreenResumed) continue
+                val front = Nx2Bridge.recentForegroundApps(context, 10_000)
+                runCatching { io.github.zortos293.lichii.utils.Log.warning(
+                    "[NX2_LIFECYCLE] Lab: screens that came to the front: $front") }
                 val moved = bringGameToFront(context)
                 Nx2Bridge.noteGameScreen("lab: not in front, moveToFront=$moved")
                 runCatching { io.github.zortos293.lichii.utils.Log.warning(

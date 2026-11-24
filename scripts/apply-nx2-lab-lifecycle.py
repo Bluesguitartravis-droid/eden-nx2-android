@@ -15,15 +15,15 @@ act = (Path(sys.argv[1]).resolve() /
        "src/android/app/src/main/java/io/github/zortos293/lichii/activities/EmulationActivity.kt")
 text = act.read_text()
 MARK = "nx2LifecycleState"
-if MARK in text:
-    print("lab-lifecycle: already applied")
-    sys.exit(0)
+already = MARK in text
 
 BRIDGE = "io.github.zortos293.lichii.nx2.Nx2Bridge"
 
 
 def rep(old, new):
     global text
+    if already:
+        return
     if text.count(old) != 1:
         sys.exit(f"lab-lifecycle: expected 1 match, found {text.count(old)}:\n{old}")
     text = text.replace(old, new)
@@ -78,4 +78,19 @@ rep("""        super.onPictureInPictureModeChanged(isInPictureInPictureMode, new
         {BRIDGE}.noteGameScreen("pip $isInPictureInPictureMode")
 """)
 act.write_text(text)
+
+# Usage access (granted by the player in Settings) lets the Lab name the app that comes to the
+# front over the game (Nx2Bridge.recentForegroundApps).
+manifest = act.parents[6] / "AndroidManifest.xml"
+mt = manifest.read_text()
+if "android.permission.PACKAGE_USAGE_STATS" not in mt:
+    anchor = '    <uses-permission android:name="android.permission.INTERNET" />\n'
+    if mt.count(anchor) != 1:
+        sys.exit("lab-lifecycle: INTERNET permission line not found once")
+    perm = ('    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"\n'
+            '        tools:ignore="ProtectedPermissions" />\n')
+    mt = mt.replace(anchor, anchor + perm)
+    if 'xmlns:tools=' not in mt:
+        mt = mt.replace('<manifest ', '<manifest xmlns:tools="http://schemas.android.com/tools" ', 1)
+    manifest.write_text(mt)
 print("lab-lifecycle: EmulationActivity reports its lifecycle to the Lab")

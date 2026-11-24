@@ -545,6 +545,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-nce-fault-ahead.py upstream
 
+      - name: Profiler clock reads without barriers on ARM64
+        shell: bash
+        run: python3 scripts/apply-nx2-relaxed-profile-clock.py upstream
+
       - name: Detect Android build requirements
         id: android_req
         shell: bash

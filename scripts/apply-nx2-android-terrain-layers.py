@@ -151,9 +151,14 @@ patch(tc,
 
 p = root / tc
 t = p.read_text()
+# Lichii after 8b84a70d builds the image in a local `make` with a `device` alias.
+image_call = (("TrimmedHostInfo(runtime_.device, info, host_level_offset)",
+               "Nx2TrimmedHostInfo(runtime_.device, info, host_level_offset, gpu_addr_)")
+              if "TrimmedHostInfo(runtime_.device, info, host_level_offset)" in t else
+              ("const ImageInfo host = TrimmedHostInfo(device, info, host_level_offset);",
+               "const ImageInfo host = Nx2TrimmedHostInfo(device, info, host_level_offset, gpu_addr_);"))
 for old, new in (
-        ("TrimmedHostInfo(runtime_.device, info, host_level_offset)",
-         "Nx2TrimmedHostInfo(runtime_.device, info, host_level_offset, gpu_addr_)"),
+        image_call,
         ("const ImageInfo host = TrimmedHostInfo(device, info, offset);",
          "const ImageInfo host = Nx2TrimmedHostInfo(device, info, offset, gpu_addr);")):
     if new not in t:

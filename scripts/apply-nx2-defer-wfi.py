@@ -33,16 +33,20 @@ def patch(name, edits):
     print(f"{name}: patched")
 
 
+# Lichii after 8b84a70d joins the parallel recorders before touching the barrier state.
+JOIN = ("        JoinRecorders();\n"
+        if "    void DeferFragmentBarrier() {\n        JoinRecorders();\n" in
+           (root / "vk_scheduler.h").read_text()
+        else "")
 patch("vk_scheduler.h", [
-    ("""    void DeferFragmentBarrier() {
-        fragment_barrier.Defer(state.renderpass != VK_NULL_HANDLE);
-    }""", """    void DeferFragmentBarrier() {
-        fragment_barrier.Defer(state.renderpass != VK_NULL_HANDLE);
+    ("    void DeferFragmentBarrier() {\n" + JOIN +
+     """        fragment_barrier.Defer(state.renderpass != VK_NULL_HANDLE);
+    }""", "    void DeferFragmentBarrier() {\n" + JOIN + """        fragment_barrier.Defer(state.renderpass != VK_NULL_HANDLE);
     }
 
     /// NX2 deferred WFI: a wait-for-idle inside the render pass, recorded when the pass ends.
     void DeferWaitForIdle(VkPipelineStageFlags flags) {
-        deferred_wfi_stages |= flags;
+""" + JOIN + """        deferred_wfi_stages |= flags;
         fragment_barrier.Defer(state.renderpass != VK_NULL_HANDLE);
     }"""),
     ("""    bool render_pass_has_stores{};""", """    bool render_pass_has_stores{};

@@ -92,20 +92,30 @@ jobs:
           # Lichii is zortos293's continuation of Eglantine nx2 (9a435b5 is an ancestor).
           git clone --recursive --branch nx2 --single-branch \
             https://github.com/zortos293/Lichii.git upstream
-          # 8b84a70d: Lichii nx2 of 2026-11-22 02:35 UTC (165 commits after 1d471c6fa, the base of
-          # builds 193-219; includes the GPU split acquire work #2143 that 217-219 cherry-picked).
+          # a7c672a8f3: Lichii nx2 of 2026-11-24 17:31 UTC (61 commits after 8b84a70d, the base of
+          # builds 220-260: back-thread draw trims #2215, early submits when the GPU idles #2466,
+          # submissions at render-pass ends #2481, repeated-shutdown fix #2502, buffer collection
+          # below the trigger #2465, ...).
           # Lichii renamed the Kotlin package to io.github.zortos293.lichii; the applicationId
           # (dev.eden.eden_emulator), so the app's data folder, is unchanged.
-          git -C upstream checkout 8b84a70d
+          git -C upstream checkout a7c672a8f3
           # godpow's ARM64 macro JIT (Djihads80/Eglantine PR #503, from an Odin 3), with the
           # split front using it; EDEN_NX2_MME_JIT=0 goes back to the interpreter.
           git -C upstream -c user.name=ci -c user.email=ci@localhost \
             am --3way "$GITHUB_WORKSPACE/patches/arm64-macro-jit.patch"
+          # From conongnang/Lichii oot-amd-perf (measured on Ocarina): kraibse's hot pages (guest
+          # pages the CPU rewrites every frame stay unprotected; EDEN_NX2_HOT_PAGES=0 at app start
+          # turns it off) and per-thread GPU page translation cache (EDEN_NX2_NO_TRANSLATION_CACHE=1),
+          # and the preflush of Ocarina's CPU-read GPU pages.
+          for p in oot-hot-pages gpu-translation-cache oot-preflush-cpu-read; do
+            git -C upstream -c user.name=ci -c user.email=ci@localhost \
+              am --3way "$GITHUB_WORKSPACE/patches/$p.patch"
+          done
           # godpow's memory/texture fixes (patches/godpow-memory-textures.patch) are left out for
           # now: with them (131-136) Mario Kart World flashed blue and drew low-detail models.
           git -C upstream submodule update --init --recursive
           echo "NX2_COMMIT=$(git -C upstream rev-parse HEAD)" >> "$GITHUB_ENV"
-          echo "NX2_UPSTREAM=zortos293/Lichii:nx2@8b84a70+jit" >> "$GITHUB_ENV"
+          echo "NX2_UPSTREAM=zortos293/Lichii:nx2@a7c672a+jit+oot" >> "$GITHUB_ENV"
           git -C upstream log -1 --oneline
 
       - name: Install host build tools

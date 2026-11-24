@@ -80,7 +80,10 @@ for hdr, src, cls in (("renderer_vulkan/vk_buffer_cache.h", "renderer_vulkan/vk_
     if "#include <source_location>" not in ht:
         ht = ht.replace("#pragma once\n", "#pragma once\n\n#include <source_location>\n", 1)
         h.write_text(ht)
-    patch(src, f"void {cls}::Finish() {{\n    scheduler.Finish();",
-          f"void {cls}::Finish(std::source_location nx2_location) {{\n    scheduler.Finish({{}}, {{}}, nx2_location);",
+    # Lichii after 8b84a70d opens an immediate arena scope first in BufferCacheRuntime::Finish.
+    scope = "    const BufferArena::ImmediateScope immediate{arena};\n"
+    body = scope if f"void {cls}::Finish() {{\n{scope}" in (root / src).read_text() else ""
+    patch(src, f"void {cls}::Finish() {{\n{body}    scheduler.Finish();",
+          f"void {cls}::Finish(std::source_location nx2_location) {{\n{body}    scheduler.Finish({{}}, {{}}, nx2_location);",
           f"{cls}::Finish(std::source_location")
 print("finish-site profiling applied")

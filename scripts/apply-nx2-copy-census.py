@@ -208,15 +208,25 @@ patch(vc / "texture_cache/texture_cache.h", [
     ("#include", INC),
 ], "Nx2CopyCensus")
 
+# Lichii after 8b84a70d returns early for CompactLayers copies before HostImageCopies.
+COPY_HEAD = (
+    "void TextureCacheRuntime::CopyImage(Image& dst, Image& src,\n"
+    "                                    std::span<const VideoCommon::ImageCopy> copies) {\n"
+    if "void TextureCacheRuntime::CopyImage(Image& dst, Image& src,\n"
+       "                                    std::span<const VideoCommon::ImageCopy> copies) {\n"
+       "    boost::container::small_vector"
+    in (vc / "renderer_vulkan/vk_texture_cache.cpp").read_text() else
+    "        src.info.format != dst.info.format) {\n"
+    "        return;\n"
+    "    }\n")
+
 patch(vc / "renderer_vulkan/vk_texture_cache.cpp", [
-    ("void TextureCacheRuntime::CopyImage(Image& dst, Image& src,\n"
-     "                                    std::span<const VideoCommon::ImageCopy> copies) {\n"
+    (COPY_HEAD +
      "    boost::container::small_vector<VideoCommon::ImageCopy, 16> host_copies;\n"
      "    copies = HostImageCopies(dst, src, copies, host_copies);\n"
      "    if (copies.empty())\n"
      "        return;\n",
-     "void TextureCacheRuntime::CopyImage(Image& dst, Image& src,\n"
-     "                                    std::span<const VideoCommon::ImageCopy> copies) {\n"
+     COPY_HEAD +
      "    boost::container::small_vector<VideoCommon::ImageCopy, 16> host_copies;\n"
      "    copies = HostImageCopies(dst, src, copies, host_copies);\n"
      "    if (copies.empty())\n"

@@ -107,7 +107,9 @@ jobs:
           # pages the CPU rewrites every frame stay unprotected; EDEN_NX2_HOT_PAGES=0 at app start
           # turns it off) and per-thread GPU page translation cache (EDEN_NX2_NO_TRANSLATION_CACHE=1),
           # and the preflush of Ocarina's CPU-read GPU pages.
-          for p in oot-hot-pages gpu-translation-cache oot-preflush-cpu-read; do
+          # 263: left out while 261-262 crash loading Ocarina's ranch (SIGABRT on RenderThread after
+          # unmapped buffer uploads); to see whether these patches or the base move cause it.
+          for p in ; do
             git -C upstream -c user.name=ci -c user.email=ci@localhost \
               am --3way "$GITHUB_WORKSPACE/patches/$p.patch"
           done

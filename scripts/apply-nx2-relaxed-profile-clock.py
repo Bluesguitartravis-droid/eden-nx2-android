@@ -11,10 +11,10 @@ cost ~10% of the GPU back thread").
   GetTimeNS().
 - Nx2Profile::Now()/Ticks() use it. EDEN_NX2_PROFILE_FENCED=1 (live, re-read every ~2 s) goes back to
   the fenced read for comparison.
-- EDEN_NX2_PROFILE=0 (read at each game boot, in VideoCore::CreateGPU): no GPU profile. Profiling was
-  forced on in these test builds, and Maxwell3D turns its fast path (fast_maxwell3d: no per-method
-  zones or virtual call, constant buffer words in one write, the front's state blocks) off whenever
-  the profile is on."""
+- The GPU profile is off unless EDEN_NX2_PROFILE=1 (read at each game boot, in VideoCore::CreateGPU).
+  Profiling was forced on in these test builds, and Maxwell3D turns its fast path (fast_maxwell3d: no
+  per-method zones or virtual call, constant buffer words in one write, the front's state blocks) off
+  whenever the profile is on. Ocarina at the ranch (Dynarmic, 261): 14.3 fps with it, 15.4 without."""
 from pathlib import Path
 import sys
 
@@ -113,8 +113,9 @@ old = """    g_enabled = true; // Eden NX2 Android test builds: always profile
     StutterTrace::ReadSwitch();"""
 if text.count(old) != 1:
     sys.exit("relaxed-profile-clock: ReadSwitch not found once")
-text = text.replace(old, """    // NX2: EDEN_NX2_PROFILE=0 turns the profile (and with it Maxwell3D's slow path) off.
-    g_enabled = VideoCommon::Nx2LiveSwitch("EDEN_NX2_PROFILE") != "0";
+text = text.replace(old, """    // NX2: the profile is off unless EDEN_NX2_PROFILE=1: while it is on, Maxwell3D leaves its
+    // fast path off (Ocarina at the ranch, Dynarmic, build 261: 14.3 fps on, 15.4 off).
+    g_enabled = VideoCommon::Nx2LiveSwitch("EDEN_NX2_PROFILE") == "1";
     StutterTrace::ReadSwitch();""")
 profile.write_text(text)
 print("relaxed-profile-clock: profiler reads CNTVCT without barriers (EDEN_NX2_PROFILE_FENCED=1 restores)")

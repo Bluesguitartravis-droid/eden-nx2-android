@@ -537,6 +537,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-nce-patch-diag.py upstream
 
+      - name: NCE patcher sees mods (fixes fast forward with Dynamic FPS patches)
+        shell: bash
+        run: python3 scripts/apply-nx2-nce-patch-mods.py upstream
+
       - name: Detect Android build requirements
         id: android_req
         shell: bash

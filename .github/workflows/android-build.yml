@@ -509,6 +509,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-nce-counter-trap.py upstream
 
+      - name: EDEN_NX2_NCE_OPEN_PAGES read at each game boot
+        shell: bash
+        run: python3 scripts/apply-nx2-nce-open-pages-live.py upstream
+
       - name: Detect Android build requirements
         id: android_req
         shell: bash

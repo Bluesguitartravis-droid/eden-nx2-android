@@ -303,6 +303,7 @@ class Nx2FrontService : Service() {
             packageManager.getLaunchIntentForPackage(packageName) ?: return "No launch intent"
         }
         target.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        Nx2Wake.prepare(this, target)
         runCatching { startActivity(target) }
         postStartNotification(target)
         val started = waitForBackend(25_000)

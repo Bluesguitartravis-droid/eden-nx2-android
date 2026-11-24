@@ -10,7 +10,11 @@ cost ~10% of the GPU back thread").
 - WallClock::GetTimeNSRelaxed(): on ARM64 (HAS_NCE) a plain `mrs cntvct_el0` scaled to ns; elsewhere
   GetTimeNS().
 - Nx2Profile::Now()/Ticks() use it. EDEN_NX2_PROFILE_FENCED=1 (live, re-read every ~2 s) goes back to
-  the fenced read for comparison."""
+  the fenced read for comparison.
+- EDEN_NX2_PROFILE=0 (read at each game boot, in VideoCore::CreateGPU): no GPU profile. Profiling was
+  forced on in these test builds, and Maxwell3D turns its fast path (fast_maxwell3d: no per-method
+  zones or virtual call, constant buffer words in one write, the front's state blocks) off whenever
+  the profile is on."""
 from pathlib import Path
 import sys
 
@@ -105,5 +109,12 @@ text = text.replace("""    {
 if '#include "video_core/nx2_live_switch.h"' not in text:
     text = text.replace('#include "video_core/nx2_stutter_trace.h"\n',
                         '#include "video_core/nx2_stutter_trace.h"\n#include "video_core/nx2_live_switch.h"\n', 1)
+old = """    g_enabled = true; // Eden NX2 Android test builds: always profile
+    StutterTrace::ReadSwitch();"""
+if text.count(old) != 1:
+    sys.exit("relaxed-profile-clock: ReadSwitch not found once")
+text = text.replace(old, """    // NX2: EDEN_NX2_PROFILE=0 turns the profile (and with it Maxwell3D's slow path) off.
+    g_enabled = VideoCommon::Nx2LiveSwitch("EDEN_NX2_PROFILE") != "0";
+    StutterTrace::ReadSwitch();""")
 profile.write_text(text)
 print("relaxed-profile-clock: profiler reads CNTVCT without barriers (EDEN_NX2_PROFILE_FENCED=1 restores)")

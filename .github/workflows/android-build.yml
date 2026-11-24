@@ -521,6 +521,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-nce-open-download.py upstream
 
+      - name: NCE open pages are gathered by InvalidateGPUCache (the white world on NCE)
+        shell: bash
+        run: python3 scripts/apply-nx2-nce-open-gather.py upstream
+
       - name: Detect Android build requirements
         id: android_req
         shell: bash

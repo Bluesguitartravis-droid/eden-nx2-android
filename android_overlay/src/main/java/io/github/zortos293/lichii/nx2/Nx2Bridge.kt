@@ -81,6 +81,7 @@ object Nx2Bridge {
     @Volatile var lastRequestMs = 0L
         private set
     @Volatile var requestCount = 0
+        private set
 
     // ---- game screen state (scripts/apply-nx2-lab-lifecycle.py) ------------------------------
     /** Whether EmulationActivity is resumed (in front and running), as it last reported. */
@@ -100,7 +101,6 @@ object Nx2Bridge {
     }
 
     fun gameScreenHistory(): String = synchronized(gameScreenEvents) { gameScreenEvents.joinToString(" | ") }
-        private set
 
     /** Frame statistics since the last call (NX2 Claude Lab window in nx2_session.h). */
     @JvmStatic external fun nativeLiveFrames(): String

@@ -474,6 +474,7 @@ jobs:
         run: |
           python3 -m py_compile scripts/apply-nx2-claude-bridge.py
           python3 scripts/apply-nx2-claude-bridge.py upstream "$RUNNER_TEMP/libnx2tunnel.so"
+          python3 scripts/apply-nx2-lab-lifecycle.py upstream
           test -f upstream/src/android/app/src/main/jniLibs/arm64-v8a/libnx2tunnel.so
 
       - name: NCE opens pages with GPU-written bytes for writing without waiting

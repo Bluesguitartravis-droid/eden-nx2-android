@@ -70,6 +70,7 @@ object Nx2Bridge {
     private val PROTOCOLS = listOf("2025-06-18", "2025-03-26", "2024-11-05")
 
     private lateinit var app: Application
+    internal fun appContext(): Context = app
     private var server: ServerSocket? = null
     private val pool = Executors.newFixedThreadPool(4) { r ->
         Thread(r, "NX2-Bridge").apply { isDaemon = true }
@@ -80,6 +81,25 @@ object Nx2Bridge {
     @Volatile var lastRequestMs = 0L
         private set
     @Volatile var requestCount = 0
+
+    // ---- game screen state (scripts/apply-nx2-lab-lifecycle.py) ------------------------------
+    /** Whether EmulationActivity is resumed (in front and running), as it last reported. */
+    @Volatile var gameScreenResumed = false
+    /** The game screen's last lifecycle events, newest last (status shows them). */
+    private val gameScreenEvents = ArrayDeque<String>()
+
+    /** Called by EmulationActivity on each lifecycle change. */
+    fun noteGameScreen(event: String, resumed: Boolean? = null) {
+        if (resumed != null) gameScreenResumed = resumed
+        val line = java.text.SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(java.util.Date()) +
+            " " + event
+        synchronized(gameScreenEvents) {
+            gameScreenEvents.addLast(line)
+            while (gameScreenEvents.size > 12) gameScreenEvents.removeFirst()
+        }
+    }
+
+    fun gameScreenHistory(): String = synchronized(gameScreenEvents) { gameScreenEvents.joinToString(" | ") }
         private set
 
     /** Frame statistics since the last call (NX2 Claude Lab window in nx2_session.h). */
@@ -321,11 +341,14 @@ internal object Nx2Tools {
                 .put("top", prop("integer", "How many shaders, default 15"))), true))
         .put(tool("list_settings", "Every setting key with its type and current value.",
             schema(JSONObject().put("filter", prop("string", "Substring of the key (optional)"))), true))
-        .put(tool("set_setting", "Change a setting by key (the game's own settings when a game with " +
-            "custom settings is running, else the global ones) and save it. Says whether it needs a restart.",
+        .put(tool("set_setting", "Change a setting by key and save it. scope auto (default): the running " +
+            "game's own settings when it has them, else the global ones; game: the last game's own settings " +
+            "(config/custom/<id>.ini, created if needed); global: config.ini (refused while a game with its " +
+            "own settings runs). Says when it takes effect.",
             schema(JSONObject()
                 .put("key", prop("string", "Setting key, e.g. resolution_setup"))
-                .put("value", prop("string", "New value (number, true/false or text)")),
+                .put("value", prop("string", "New value (number, true/false or text)"))
+                .put("scope", prop("string", "auto, game or global")),
                 listOf("key", "value")), false))
         .put(tool("get_switches", "The EDEN_NX2_* switches file and the switches in effect now.", schema(), true))
         .put(tool("set_switches", "Replace the switches file (NAME=VALUE lines; empty clears it). " +
@@ -436,7 +459,8 @@ internal object Nx2Tools {
             "frame_trace_summary" -> text(frameTrace(context, args.optInt("seconds", 30),
                 args.optInt("top", 15).coerceIn(1, 60)))
             "list_settings" -> text(listSettings(args.optString("filter", "")))
-            "set_setting" -> text(setSetting(args.getString("key"), args.get("value").toString()))
+            "set_setting" -> text(setSetting(context, args.getString("key"), args.get("value").toString(),
+                args.optString("scope", "auto")))
             "get_switches" -> text(getSwitches())
             "set_switches" -> text(setSwitches(args.getString("lines")))
             "list_games" -> text(listGames(context).toString(2))
@@ -645,7 +669,15 @@ internal object Nx2Tools {
         // renderer logs its device and driver at boot ("Driver: ...", "Device: ..."): read those.
         if (isRunning) gpuFromLog(context)?.let { gpuLine = it }
         out.append(gpuLine ?: "gpu=(read while a game runs)").append('\n')
-        out.append("per_game_settings_loaded=").append(runCatching { NativeConfig.isPerGameConfigLoaded() }.getOrDefault(false)).append('\n')
+        out.append("game_screen=").append(if (Nx2Bridge.gameScreenResumed) "in front" else "not in front")
+            .append(" [").append(Nx2Bridge.gameScreenHistory()).append("]\n")
+        val gameConfig = lastGameConfig(context)
+        out.append("game_settings=").append(when {
+            gameConfig == null -> "-"
+            gameConfig.custom.isFile -> "the last game has its own settings (" + gameConfig.custom.name +
+                "); set_setting changes them while it runs"
+            else -> "the last game uses the global settings"
+        }).append('\n')
         for (key in listOf("resolution_setup", "oot_anti_aliasing", "anti_aliasing", "scaling_filter",
             "vram_usage_mode", "precache_shaders", "use_vsync", "gpu_accuracy", "use_disk_shader_cache")) {
             out.append(key).append('=').append(getSetting(key) ?: "?").append('\n')
@@ -757,35 +789,35 @@ internal object Nx2Tools {
 
     // ---- settings ---------------------------------------------------------------------------
 
-    private data class Known(val type: String, val get: () -> String, val set: (String) -> Unit)
+    private data class Known(val type: String, val get: (Boolean) -> String, val set: (String) -> Unit)
 
     private fun known(key: String): Known? {
         BooleanSetting.entries.firstOrNull { it.key == key }?.let {
-            return Known("boolean", { NativeConfig.getBoolean(key, false).toString() },
+            return Known("boolean", { global -> NativeConfig.getBoolean(key, global).toString() },
                 { NativeConfig.setBoolean(key, parseBool(it)) })
         }
         IntSetting.entries.firstOrNull { it.key == key }?.let {
-            return Known("int", { NativeConfig.getInt(key, false).toString() },
+            return Known("int", { global -> NativeConfig.getInt(key, global).toString() },
                 { v -> NativeConfig.setInt(key, v.trim().toInt()) })
         }
         ByteSetting.entries.firstOrNull { it.key == key }?.let {
-            return Known("byte", { NativeConfig.getByte(key, false).toString() },
+            return Known("byte", { global -> NativeConfig.getByte(key, global).toString() },
                 { v -> NativeConfig.setByte(key, v.trim().toInt().toByte()) })
         }
         ShortSetting.entries.firstOrNull { it.key == key }?.let {
-            return Known("short", { NativeConfig.getShort(key, false).toString() },
+            return Known("short", { global -> NativeConfig.getShort(key, global).toString() },
                 { v -> NativeConfig.setShort(key, v.trim().toInt().toShort()) })
         }
         FloatSetting.entries.firstOrNull { it.key == key }?.let {
-            return Known("float", { NativeConfig.getFloat(key, false).toString() },
+            return Known("float", { global -> NativeConfig.getFloat(key, global).toString() },
                 { v -> NativeConfig.setFloat(key, v.trim().toFloat()) })
         }
         LongSetting.entries.firstOrNull { it.key == key }?.let {
-            return Known("long", { NativeConfig.getLong(key, false).toString() },
+            return Known("long", { global -> NativeConfig.getLong(key, global).toString() },
                 { v -> NativeConfig.setLong(key, v.trim().toLong()) })
         }
         StringSetting.entries.firstOrNull { it.key == key }?.let {
-            return Known("string", { NativeConfig.getString(key, false) },
+            return Known("string", { global -> NativeConfig.getString(key, global) },
                 { v -> NativeConfig.setString(key, v) })
         }
         return null
@@ -797,33 +829,95 @@ internal object Nx2Tools {
         else -> throw IllegalArgumentException("Not a boolean: $value")
     }
 
-    private fun getSetting(key: String): String? = runCatching { known(key)?.get?.invoke() }.getOrNull()
+    private fun getSetting(key: String, global: Boolean = false): String? =
+        runCatching { known(key)?.get?.invoke(global) }.getOrNull()
 
     private fun listSettings(filter: String): String {
         val keys = (BooleanSetting.entries.map { it.key } + IntSetting.entries.map { it.key } +
             ByteSetting.entries.map { it.key } + ShortSetting.entries.map { it.key } +
             FloatSetting.entries.map { it.key } + LongSetting.entries.map { it.key } +
             StringSetting.entries.map { it.key }).distinct().sorted()
+        // A game with its own settings running: show its value and, where it differs, the global one.
+        val gameOwn = running() && lastGameConfig(Nx2Bridge.appContext())?.custom?.isFile == true
         return keys.filter { filter.isEmpty() || it.contains(filter, ignoreCase = true) }.joinToString("\n") { key ->
             val k = known(key)
             val restart = runCatching { !NativeConfig.getIsRuntimeModifiable(key) }.getOrDefault(true)
-            "$key (${k?.type}) = ${getSetting(key)}" + if (restart) " [restart]" else ""
+            val value = getSetting(key)
+            val global = if (gameOwn) getSetting(key, global = true) else null
+            "$key (${k?.type}) = $value" +
+                (if (global != null && global != value) " (this game; global $global)" else "") +
+                if (restart) " [restart]" else ""
         }
     }
 
-    private fun setSetting(key: String, value: String): String {
+    /** The last game's program id, file name and own settings file (config/custom/<id>.ini). */
+    internal data class GameConfig(val programId: String, val fileName: String, val custom: File)
+
+    internal fun lastGameConfig(context: Context): GameConfig? = runCatching {
+        val path = Nx2Bridge.lastGamePath() ?: return null
+        val games = listGames(context)
+        val game = (0 until games.length()).map { games.getJSONObject(it) }
+            .firstOrNull { it.optString("path") == path } ?: return null
+        val programId = game.optString("program_id")
+        val id = programId.toLongOrNull() ?: 0L
+        val fileName = io.github.zortos293.lichii.utils.FileUtil.getFilename(Uri.parse(path))
+        val name = if (id == 0L) fileName else "0" + id.toString(16).uppercase(Locale.US)
+        val dir = io.github.zortos293.lichii.utils.DirectoryInitialization.userDirectory ?: return null
+        GameConfig(programId, fileName, File("$dir/config/custom/$name.ini"))
+    }.getOrNull()
+
+    /** scope: "game" (the last game's own settings file), "global", or "auto": the running game's
+     *  own settings when it has them, else the global ones. Eden loads a game's own settings over
+     *  the global ones at launch and then drops the per-game layer, so saving "global" while such a
+     *  game runs would write the game's values into config.ini: that is refused. */
+    private fun setSetting(context: Context, key: String, value: String, scope: String): String {
         val k = known(key) ?: return "Unknown setting key: $key (see list_settings)"
-        val perGame = runCatching { NativeConfig.isPerGameConfigLoaded() }.getOrDefault(false)
-        if (perGame && runCatching { NativeConfig.getIsSwitchable(key) }.getOrDefault(false)) {
-            NativeConfig.setGlobal(key, false)
+        val game = lastGameConfig(context)
+        val isRunning = running()
+        val gameOwn = isRunning && game?.custom?.isFile == true
+        val target = when (scope.lowercase(Locale.US)) {
+            "game" -> "game"
+            "global" -> "global"
+            else -> if (gameOwn) "game" else "global"
         }
-        val before = k.get()
-        k.set(value)
-        if (perGame) NativeConfig.savePerGameConfig() else NativeConfig.saveGlobalConfig()
         val runtime = runCatching { NativeConfig.getIsRuntimeModifiable(key) }.getOrDefault(false)
-        if (running() && runtime) runCatching { NativeLibrary.applySettings() }
-        return "$key: $before -> ${k.get()} (${if (perGame) "this game's settings" else "global settings"}); " +
-            if (runtime) "applied now" else "takes effect after restart_app"
+        if (target == "global") {
+            if (gameOwn) {
+                return "Not changed: the running game has its own settings (${game!!.custom.name}), and " +
+                    "saving the global settings now would copy its values into them. Use scope=game, or " +
+                    "exit_game first."
+            }
+            // Drop any per-game values a launch left in memory before saving config.ini.
+            if (!isRunning) runCatching { NativeConfig.reloadGlobalConfig() }
+            val before = k.get(true)
+            k.set(value)
+            NativeConfig.saveGlobalConfig()
+            if (isRunning && runtime) runCatching { NativeLibrary.applySettings() }
+            return "$key: $before -> ${k.get(true)} (global settings); " +
+                if (runtime && isRunning) "applied now" else "takes effect at the next game boot" +
+                    if (runtime) "" else " (needs restart_app)"
+        }
+        if (game == null) return "Not changed: no last game to take its own settings from (launch it first)."
+        val created = !game.custom.isFile
+        NativeConfig.initializePerGameConfig(game.programId, game.fileName)
+        try {
+            if (runCatching { NativeConfig.getIsSwitchable(key) }.getOrDefault(false)) {
+                NativeConfig.setGlobal(key, false)
+            }
+            val before = k.get(false)
+            k.set(value)
+            NativeConfig.savePerGameConfig()
+            val after = k.get(false)
+            if (isRunning && runtime) runCatching { NativeLibrary.applySettings() }
+            return "$key: $before -> $after (this game's own settings, ${game.custom.name}" +
+                (if (created) ", created" else "") + "); " +
+                if (runtime && isRunning) "applied now" else "takes effect at the next launch of the game" +
+                    if (runtime) "" else " (needs restart_app)"
+        } finally {
+            NativeConfig.unloadPerGameConfig()
+            // Without a running game, memory goes back to the global settings.
+            if (!isRunning) runCatching { NativeConfig.reloadGlobalConfig() }
+        }
     }
 
     // ---- switches ---------------------------------------------------------------------------
@@ -893,8 +987,35 @@ internal object Nx2Tools {
         val game = findGame(context, query) ?: return "No game matches \"$query\" (see list_games)"
         context.startActivity(gameIntent(context, game.getString("path")))
         Nx2Bridge.rememberGame(game.getString("path"))
+        keepGameInFront(context)
         return "Launching ${game.optString("title")}"
     }
+
+    /** After a launch: if the game screen is not in front 3, 6, 10 and 15 s later, bring Eden's
+     *  task with it to the front again (the game screen was seen paused ~30 ms after a launch,
+     *  never resumed, and the game stopped drawing). */
+    internal fun keepGameInFront(context: Context) {
+        Thread({
+            for (delay in longArrayOf(3000, 3000, 4000, 5000)) {
+                Thread.sleep(delay)
+                if (Nx2Bridge.gameScreenResumed) continue
+                val moved = bringGameToFront(context)
+                Nx2Bridge.noteGameScreen("lab: not in front, moveToFront=$moved")
+                runCatching { io.github.zortos293.lichii.utils.Log.warning(
+                    "[NX2_LIFECYCLE] Lab: game screen not in front after a launch; moveToFront=$moved") }
+            }
+        }, "NX2-KeepFront").apply { isDaemon = true }.start()
+    }
+
+    /** Brings Eden's task that holds the game screen to the front. */
+    internal fun bringGameToFront(context: Context): String = runCatching {
+        val manager = context.getSystemService(ActivityManager::class.java) ?: return "no ActivityManager"
+        val task = manager.appTasks.firstOrNull {
+            it.taskInfo.topActivity?.className?.endsWith("EmulationActivity") == true
+        } ?: manager.appTasks.firstOrNull() ?: return "no task"
+        task.moveToFront()
+        "moved " + (task.taskInfo.topActivity?.shortClassName ?: "?")
+    }.getOrElse { "failed: ${it.javaClass.simpleName}: ${it.message}" }
 
     private fun restartApp(context: Context, relaunch: Boolean): String {
         val path = Nx2Bridge.lastGamePath()

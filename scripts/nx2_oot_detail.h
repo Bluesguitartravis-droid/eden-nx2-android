@@ -13,12 +13,30 @@
 //   ug       IsEnableUndergrowth4, IsEnableUndergrowth8
 //   IsEnable<Name>[,IsEnable<Name>...]  those keys (measurement)
 // empty / full / 0: the game's own files. The grass (IsEnableTurf) is never touched.
+//
+// Build 276 adds, read at each game boot too:
+// EDEN_NX2_OOT_PARAM  edits of any of the game's BYML parameter files, rows separated by ';':
+//   <RomFS path, its last component may be a glob>|<key path>|<edit>
+//   pack:<pack path>:<member glob>|<key path>|<edit>
+//   key path: components separated by '.', each a glob over a dictionary's keys or an array index;
+//   edit: x<factor> (scale a number), =true, =false, =<number>. In place, sizes kept. A value the game's
+//   writer stores once for several paths changes for all of them.
+// EDEN_NX2_OOT_LIST   comma-separated substrings (case-insensitive): NX2_LIST log lines for the RomFS files and
+//   the members of the top-level Pack/*.pack.zs packs whose paths contain one; "packs" also lists every pack.
 #pragma once
 
+#include <algorithm>
+#include <cctype>
+#include <cmath>
+#include <cstdlib>
 #include <cstring>
+#include <map>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
+
+#include <fnmatch.h>
 
 #include <zstd.h>
 
@@ -344,114 +362,640 @@ inline std::vector<u8> Decode(const std::vector<u8>& src,
     return out;
 }
 
-// The RomFS layer with the edited Pack/Foliage.pack.zs, or nullptr (the game's own files)
-inline VirtualDir BuildOverlay(const VirtualDir& romfs, const std::vector<std::string>& keys) {
-    if (romfs == nullptr || keys.empty()) {
+// ---- EDEN_NX2_OOT_PARAM / EDEN_NX2_OOT_LIST ----
+
+enum class EditKind { Scale, SetBool, SetNum };
+
+struct ParamRow {
+    bool pack = false;
+    std::string path;    // RomFS path (loose) or the pack's path
+    std::string member;  // member glob (pack rows)
+    std::string key;     // key path
+    std::string text;    // the row as given, for the log
+    EditKind kind = EditKind::Scale;
+    double num = 0;
+    bool b = false;
+    int files = 0;
+    int values = 0;
+};
+
+inline std::vector<std::string> Split(const std::string& s, char c) {
+    std::vector<std::string> out;
+    size_t at = 0;
+    while (true) {
+        const size_t e = s.find(c, at);
+        std::string part = s.substr(at, e == std::string::npos ? std::string::npos : e - at);
+        while (!part.empty() && part.front() == ' ') {
+            part.erase(part.begin());
+        }
+        while (!part.empty() && part.back() == ' ') {
+            part.pop_back();
+        }
+        out.push_back(std::move(part));
+        if (e == std::string::npos) {
+            return out;
+        }
+        at = e + 1;
+    }
+}
+
+inline bool ParseEdit(const std::string& s, ParamRow& q) {
+    char* end = nullptr;
+    if (s.size() > 1 && s[0] == 'x') {
+        const double f = std::strtod(s.c_str() + 1, &end);
+        if (*end != 0 || !std::isfinite(f) || f <= 0) {
+            return false;
+        }
+        q.kind = EditKind::Scale;
+        q.num = f;
+        return true;
+    }
+    if (s == "=true" || s == "=false") {
+        q.kind = EditKind::SetBool;
+        q.b = s == "=true";
+        return true;
+    }
+    if (s.size() > 1 && s[0] == '=') {
+        const double v = std::strtod(s.c_str() + 1, &end);
+        if (*end != 0 || !std::isfinite(v)) {
+            return false;
+        }
+        q.kind = EditKind::SetNum;
+        q.num = v;
+        return true;
+    }
+    return false;
+}
+
+inline std::vector<ParamRow> WantedParams(u64 title_id) {
+    if (title_id != kOcarina) {
+        return {};
+    }
+    std::vector<ParamRow> rows;
+    for (const auto& row : Split(VideoCommon::Nx2LiveSwitch("EDEN_NX2_OOT_PARAM"), ';')) {
+        if (row.empty()) {
+            continue;
+        }
+        const auto f = Split(row, '|');
+        ParamRow q;
+        q.text = row;
+        bool ok = f.size() == 3 && !f[0].empty() && !f[1].empty() && ParseEdit(f[2], q);
+        if (ok && f[0].rfind("pack:", 0) == 0) {
+            const size_t c = f[0].find(':', 5);
+            ok = c != std::string::npos && c > 5 && c + 1 < f[0].size();
+            if (ok) {
+                q.pack = true;
+                q.path = f[0].substr(5, c - 5);
+                q.member = f[0].substr(c + 1);
+            }
+        } else if (ok) {
+            q.path = f[0];
+        }
+        if (!ok) {
+            LOG_WARNING(Loader, "NX2_PARAM row \"{}\" left out: <file>|<key path>|<x<factor> | =true | =false | =<number>>", row);
+            continue;
+        }
+        q.key = f[1];
+        rows.push_back(std::move(q));
+    }
+    return rows;
+}
+
+inline std::vector<std::string> WantedList(u64 title_id) {
+    if (title_id != kOcarina) {
+        return {};
+    }
+    std::vector<std::string> out;
+    for (auto s : Split(VideoCommon::Nx2LiveSwitch("EDEN_NX2_OOT_LIST"), ',')) {
+        if (!s.empty()) {
+            std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return std::tolower(c); });
+            out.push_back(std::move(s));
+        }
+    }
+    return out;
+}
+
+struct Request {
+    std::vector<std::string> keys;
+    std::vector<ParamRow> params;
+    std::vector<std::string> list;
+    bool Any() const {
+        return !keys.empty() || !params.empty() || !list.empty();
+    }
+};
+
+inline Request Wanted(u64 title_id) {
+    return Request{WantedKeys(title_id), WantedParams(title_id), WantedList(title_id)};
+}
+
+// ---- BYML, generic edit ----
+
+struct Byml {
+    u8* b = nullptr;
+    size_t n = 0;
+    bool be = false;
+    u32 kt = 0;
+    u32 nkeys = 0;
+    u32 root = 0;
+};
+
+inline bool BymlOpen(Byml& y, u8* b, size_t n, std::string& why) {
+    y = {};
+    y.b = b;
+    y.n = n;
+    if (n < 16 || !((b[0] == 'Y' && b[1] == 'B') || (b[0] == 'B' && b[1] == 'Y'))) {
+        why = "not a BYML file";
+        return false;
+    }
+    y.be = b[0] == 'B';
+    const u32 ver = Rd(b, 2, 2, y.be);
+    if (ver < 2 || ver > 10) {
+        why = "BYML version " + std::to_string(ver);
+        return false;
+    }
+    y.kt = Rd(b, 4, 4, y.be);
+    y.root = Rd(b, 12, 4, y.be);
+    if (y.kt != 0) {
+        if (y.kt > n - 8 || b[y.kt] != 0xC2) {
+            why = "BYML key table";
+            return false;
+        }
+        y.nkeys = Rd(b, y.kt + 1, 3, y.be);
+        if (static_cast<u64>(y.kt) + 4 + 4ULL * (y.nkeys + 1) > n) {
+            why = "BYML key table runs past the file";
+            return false;
+        }
+    }
+    if (y.root != 0 && y.root > n - 4) {
+        why = "BYML root past the file";
+        return false;
+    }
+    return true;
+}
+
+inline const char* BymlKey(const Byml& y, u32 i) {
+    if (i >= y.nkeys) {
+        return nullptr;
+    }
+    const u64 o = static_cast<u64>(y.kt) + Rd(y.b, y.kt + 4 + 4 * i, 4, y.be);
+    if (o >= y.n || std::memchr(y.b + o, 0, y.n - static_cast<size_t>(o)) == nullptr) {
+        return nullptr;
+    }
+    return reinterpret_cast<const char*>(y.b + o);
+}
+
+inline void Wr(Byml& y, size_t o, u64 v, int w) {
+    for (int i = 0; i < w; i++) {
+        y.b[o + i] = static_cast<u8>(v >> (8 * (y.be ? w - 1 - i : i)));
+    }
+}
+
+// One value (type t, slot = its 4-byte slot) edited; false with why when the edit does not fit its type
+inline bool BymlApply(Byml& y, int t, size_t slot, const ParamRow& q, const std::string& path, std::string& why) {
+    size_t at = slot;
+    int w = 4;
+    if (t == 0xD4 || t == 0xD5 || t == 0xD6) {
+        at = Rd(y.b, slot, 4, y.be);
+        w = 8;
+        if (y.n < 8 || at > y.n - 8) {
+            why = path + ": its 64-bit value is past the file";
+            return false;
+        }
+    }
+    u64 raw = 0;
+    for (int i = 0; i < w; i++) {
+        raw |= static_cast<u64>(y.b[at + i]) << (8 * (y.be ? w - 1 - i : i));
+    }
+    if (t == 0xD0) {
+        if (q.kind != EditKind::SetBool || raw > 1) {
+            why = path + " is a boolean: =true or =false";
+            return false;
+        }
+        Wr(y, at, q.b ? 1 : 0, 4);
+        return true;
+    }
+    if (t != 0xD1 && t != 0xD2 && t != 0xD3 && t != 0xD4 && t != 0xD5 && t != 0xD6) {
+        why = path + " is not a number or a boolean (type " + std::to_string(t) + ")";
+        return false;
+    }
+    if (q.kind == EditKind::SetBool) {
+        why = path + " is a number: x<factor> or =<number>";
+        return false;
+    }
+    double old;
+    if (t == 0xD2) {
+        const u32 u = static_cast<u32>(raw);
+        float f;
+        std::memcpy(&f, &u, 4);
+        old = f;
+    } else if (t == 0xD6) {
+        double d;
+        std::memcpy(&d, &raw, 8);
+        old = d;
+    } else if (t == 0xD1) {
+        old = static_cast<s32>(static_cast<u32>(raw));
+    } else if (t == 0xD4) {
+        old = static_cast<double>(static_cast<s64>(raw));
+    } else {
+        old = static_cast<double>(raw);
+    }
+    double v = q.kind == EditKind::Scale ? old * q.num : q.num;
+    if (t == 0xD2) {
+        const float f = static_cast<float>(v);
+        u32 u;
+        std::memcpy(&u, &f, 4);
+        Wr(y, at, u, 4);
+    } else if (t == 0xD6) {
+        u64 u;
+        std::memcpy(&u, &v, 8);
+        Wr(y, at, u, 8);
+    } else {
+        v = std::round(v);
+        if ((t == 0xD3 || t == 0xD5) && v < 0) {
+            v = 0;
+        }
+        const u64 u = (t == 0xD1 || t == 0xD4) ? static_cast<u64>(static_cast<s64>(v)) : static_cast<u64>(v);
+        Wr(y, at, u, w);
+    }
+    return true;
+}
+
+// The values under the node at o reached by components [ci, ...) edited once each (done holds the slots already
+// edited by this row in this file). false with why on a malformed file or an edit that does not fit.
+inline bool BymlWalk(Byml& y, u32 o, const std::vector<std::string>& comps, size_t ci, const ParamRow& q,
+                     const std::string& path, int depth, std::set<size_t>& done, int& found, std::string& why) {
+    if (depth > 32 || y.n < 4 || o > y.n - 4) {
+        why = (path.empty() ? std::string{"the root"} : path) + ": too deep or past the file";
+        return false;
+    }
+    const int t = y.b[o];
+    if (t != 0xC0 && t != 0xC1) {
+        return true;  // a value where the path goes on: not this path
+    }
+    const u32 cnt = Rd(y.b, o + 1, 3, y.be);
+    const u64 vals = t == 0xC1 ? static_cast<u64>(o) + 4 : static_cast<u64>(o) + 4 + ((cnt + 3) & ~3U);
+    const u64 step = t == 0xC1 ? 8 : 4;
+    if (vals + step * cnt > y.n) {
+        why = path + ": a container past the file";
+        return false;
+    }
+    const bool last = ci + 1 == comps.size();
+    for (u32 i = 0; i < cnt; i++) {
+        std::string name;
+        int et;
+        size_t slot;
+        if (t == 0xC1) {
+            const size_t e = static_cast<size_t>(vals) + 8 * static_cast<size_t>(i);
+            const char* k = BymlKey(y, Rd(y.b, e, 3, y.be));
+            if (k == nullptr) {
+                why = path + ": a key index outside the key table";
+                return false;
+            }
+            name = k;
+            et = y.b[e + 3];
+            slot = e + 4;
+        } else {
+            name = std::to_string(i);
+            et = y.b[o + 4 + i];
+            slot = static_cast<size_t>(vals) + 4 * static_cast<size_t>(i);
+        }
+        if (fnmatch(comps[ci].c_str(), name.c_str(), 0) != 0) {
+            continue;
+        }
+        const std::string p = path.empty() ? name : path + "." + name;
+        const bool container = et == 0xC0 || et == 0xC1;
+        if (!last) {
+            if (container &&
+                !BymlWalk(y, Rd(y.b, slot, 4, y.be), comps, ci + 1, q, p, depth + 1, done, found, why)) {
+                return false;
+            }
+            continue;
+        }
+        if (container) {
+            why = p + " is a container, not a value";
+            return false;
+        }
+        const size_t id = (et == 0xD4 || et == 0xD5 || et == 0xD6) ? (size_t{1} << 40) | Rd(y.b, slot, 4, y.be) : slot;
+        found++;
+        if (!done.insert(id).second) {
+            continue;
+        }
+        if (!BymlApply(y, et, slot, q, p, why)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Returns the values the row's key path reaches in this file (edited in place), -1 with why
+inline int BymlEdit(std::vector<u8>& file, const ParamRow& q, std::string& why) {
+    Byml y;
+    if (!BymlOpen(y, file.data(), file.size(), why)) {
+        return -1;
+    }
+    if (y.root == 0) {
+        return 0;
+    }
+    std::set<size_t> done;
+    int found = 0;
+    if (!BymlWalk(y, y.root, Split(q.key, '.'), 0, q, "", 0, done, found, why)) {
+        return -1;
+    }
+    return found;
+}
+
+// ---- The overlay ----
+
+inline bool LoadDicts(const VirtualDir& romfs, std::vector<std::pair<u32, std::vector<u8>>>& dicts, std::string& why) {
+    const VirtualDir pack_dir = romfs->GetSubdirectory("Pack");
+    const auto zs = pack_dir != nullptr ? ReadAll(pack_dir->GetFile("ZsDic.pack.zs")) : std::vector<u8>{};
+    if (zs.empty()) {
+        why = "Pack/ZsDic.pack.zs missing";
+        return false;
+    }
+    const auto sarc = Decode(zs, {}, why);
+    std::vector<Member> ms;
+    if (sarc.empty() || !ParseSarc(sarc, ms, why)) {
+        why = "Pack/ZsDic.pack.zs: " + why;
+        return false;
+    }
+    for (const auto& m : ms) {
+        if (m.name.size() < 6 || m.name.compare(m.name.size() - 6, 6, ".zsdic") != 0) {
+            continue;
+        }
+        std::vector<u8> d(sarc.begin() + m.start, sarc.begin() + m.end);
+        const u32 id = static_cast<u32>(ZSTD_getDictID_fromDict(d.data(), d.size()));
+        dicts.emplace_back(id, std::move(d));
+    }
+    return true;
+}
+
+struct PackEdit {
+    bool ok = false;
+    ZHead head;
+    size_t src_size = 0;
+    std::vector<u8> sarc;
+    std::vector<Member> ms;
+    bool changed = false;
+};
+
+struct Node {
+    std::map<std::string, Node> dirs;
+    std::map<std::string, std::vector<u8>> files;
+};
+
+inline VirtualDir MakeDir(Node& node, const std::string& name) {
+    std::vector<VirtualFile> files;
+    std::vector<VirtualDir> dirs;
+    for (auto& [n, bytes] : node.files) {
+        files.push_back(std::make_shared<VectorVfsFile>(std::move(bytes), n));
+    }
+    for (auto& [n, child] : node.dirs) {
+        dirs.push_back(MakeDir(child, n));
+    }
+    return std::make_shared<VectorVfsDirectory>(std::move(files), std::move(dirs), name);
+}
+
+inline void ListFiles(const VirtualDir& romfs, const std::vector<std::string>& subs) {
+    const auto matches = [&](std::string s) {
+        std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return std::tolower(c); });
+        for (const auto& sub : subs) {
+            if (s.find(sub) != std::string::npos) {
+                return true;
+            }
+        }
+        return false;
+    };
+    const bool all_packs = std::find(subs.begin(), subs.end(), "packs") != subs.end();
+    int lines = 0, total = 0;
+    std::vector<std::pair<std::string, VirtualDir>> stack{{"", romfs}};
+    while (!stack.empty()) {
+        auto [prefix, dir] = std::move(stack.back());
+        stack.pop_back();
+        for (const auto& f : dir->GetFiles()) {
+            const std::string p = prefix + f->GetName();
+            total++;
+            if (matches(p) && lines < 600) {
+                LOG_INFO(Loader, "NX2_LIST file {} ({} bytes)", p, f->GetSize());
+                lines++;
+            }
+        }
+        for (const auto& d : dir->GetSubdirectories()) {
+            if (prefix.empty()) {
+                LOG_INFO(Loader, "NX2_LIST top folder {}/ ({} files directly in it)", d->GetName(), d->GetFiles().size());
+            }
+            stack.emplace_back(prefix + d->GetName() + "/", d);
+        }
+    }
+    LOG_INFO(Loader, "NX2_LIST {} RomFS files, {} listed", total, lines);
+    std::vector<std::pair<u32, std::vector<u8>>> dicts;
+    std::string why;
+    if (!LoadDicts(romfs, dicts, why)) {
+        LOG_WARNING(Loader, "NX2_LIST packs not read: {}", why);
+        return;
+    }
+    const VirtualDir pack_dir = romfs->GetSubdirectory("Pack");
+    int member_lines = 0;
+    for (const auto& f : pack_dir->GetFiles()) {
+        const std::string name = f->GetName();
+        if (name.size() < 8 || name.compare(name.size() - 8, 8, ".pack.zs") != 0) {
+            continue;
+        }
+        if (all_packs) {
+            LOG_INFO(Loader, "NX2_LIST pack Pack/{} ({} bytes)", name, f->GetSize());
+        }
+        if (f->GetSize() > (64U << 20)) {
+            continue;
+        }
+        std::string pwhy;
+        const auto sarc = Decode(ReadAll(f), dicts, pwhy);
+        std::vector<Member> ms;
+        if (sarc.empty() || !ParseSarc(sarc, ms, pwhy)) {
+            LOG_INFO(Loader, "NX2_LIST pack Pack/{} not read: {}", name, pwhy);
+            continue;
+        }
+        for (const auto& m : ms) {
+            if (matches(m.name) && member_lines < 1500) {
+                LOG_INFO(Loader, "NX2_LIST member pack:Pack/{}:{} ({} bytes)", name, m.name, m.end - m.start);
+                member_lines++;
+            }
+        }
+    }
+    LOG_INFO(Loader, "NX2_LIST {} pack members listed", member_lines);
+}
+
+// The RomFS layer with every requested edit, or nullptr (the game's own files)
+inline VirtualDir BuildOverlay(const VirtualDir& romfs, Request req) {
+    if (romfs == nullptr || !req.Any()) {
+        return nullptr;
+    }
+    if (!req.list.empty()) {
+        ListFiles(romfs, req.list);
+    }
+    if (req.keys.empty() && req.params.empty()) {
         return nullptr;
     }
     std::string why;
-    const auto fail = [&](const std::string& what) -> VirtualDir {
-        LOG_ERROR(Loader, "NX2_DETAIL {}: {}; Ocarina keeps its own foliage files", what, why);
-        return nullptr;
-    };
-    const VirtualDir pack_dir = romfs->GetSubdirectory("Pack");
-    if (pack_dir == nullptr) {
-        why = "no Pack folder";
-        return fail("RomFS");
-    }
-    // The dictionaries
     std::vector<std::pair<u32, std::vector<u8>>> dicts;
-    {
-        const auto zs = ReadAll(pack_dir->GetFile("ZsDic.pack.zs"));
-        if (zs.empty()) {
-            why = "missing";
-            return fail("Pack/ZsDic.pack.zs");
+    bool dicts_loaded = false, dicts_ok = false;
+    std::map<std::string, PackEdit> packs;
+    const auto get_pack = [&](const std::string& path) -> PackEdit* {
+        auto it = packs.find(path);
+        if (it != packs.end()) {
+            return it->second.ok ? &it->second : nullptr;
         }
-        const auto sarc = Decode(zs, {}, why);
-        if (sarc.empty()) {
-            return fail("Pack/ZsDic.pack.zs");
+        PackEdit& pe = packs[path];
+        if (!dicts_loaded) {
+            dicts_loaded = true;
+            dicts_ok = LoadDicts(romfs, dicts, why);
+            if (!dicts_ok) {
+                LOG_ERROR(Loader, "NX2_DETAIL {}", why);
+            }
         }
-        std::vector<Member> ms;
-        if (!ParseSarc(sarc, ms, why)) {
-            return fail("Pack/ZsDic.pack.zs");
+        if (!dicts_ok) {
+            return nullptr;
         }
-        for (const auto& m : ms) {
-            if (m.name.size() < 6 || m.name.compare(m.name.size() - 6, 6, ".zsdic") != 0) {
+        const auto src = ReadAll(romfs->GetFileRelative(path));
+        std::string pwhy;
+        if (src.empty() || !ZstdHead(src.data(), src.size(), pe.head, pwhy)) {
+            LOG_ERROR(Loader, "NX2_DETAIL {}: {}", path, src.empty() ? "missing" : pwhy);
+            return nullptr;
+        }
+        pe.src_size = src.size();
+        pe.sarc = Decode(src, dicts, pwhy);
+        if (pe.sarc.empty() || !ParseSarc(pe.sarc, pe.ms, pwhy)) {
+            LOG_ERROR(Loader, "NX2_DETAIL {}: {}", path, pwhy);
+            return nullptr;
+        }
+        pe.ok = true;
+        return &pe;
+    };
+
+    // The foliage layers (EDEN_NX2_OOT_DETAIL)
+    if (!req.keys.empty()) {
+        if (PackEdit* pe = get_pack("Pack/Foliage.pack.zs")) {
+            static constexpr std::string_view prefix = "Foliage/ResFoliageScene/";
+            static constexpr std::string_view suffix = ".game__foliage__ResFoliageScene.bgyml";
+            int scenes = 0, edited = 0, values = 0, bad = 0;
+            for (const auto& m : pe->ms) {
+                if (m.name.size() < prefix.size() + suffix.size() || m.name.rfind(prefix, 0) != 0 ||
+                    m.name.compare(m.name.size() - suffix.size(), suffix.size(), suffix) != 0) {
+                    continue;
+                }
+                scenes++;
+                std::vector<u8> copy(pe->sarc.begin() + m.start, pe->sarc.begin() + m.end);
+                std::string bwhy;
+                const int c = ClearBools(copy.data(), copy.size(), req.keys, bwhy);
+                if (c < 0) {
+                    bad++;
+                    LOG_WARNING(Loader, "NX2_DETAIL {}: {}; the scene keeps its own values", m.name, bwhy);
+                    continue;
+                }
+                if (c > 0) {
+                    std::memcpy(pe->sarc.data() + m.start, copy.data(), copy.size());
+                    edited++;
+                    values += c;
+                    pe->changed = true;
+                }
+            }
+            std::string list;
+            for (const auto& k : req.keys) {
+                list += (list.empty() ? "" : ",") + k;
+            }
+            LOG_INFO(Loader, "NX2_DETAIL Ocarina foliage layers off ({}): {} of {} scene files edited, {} values, {} skipped",
+                     list, edited, scenes, values, bad);
+        }
+    }
+
+    // The parameter rows (EDEN_NX2_OOT_PARAM)
+    Node tree;
+    std::map<std::string, std::vector<u8>> loose;
+    for (auto& q : req.params) {
+        std::string ewhy;
+        if (q.pack) {
+            PackEdit* pe = get_pack(q.path);
+            if (pe == nullptr) {
+                LOG_WARNING(Loader, "NX2_PARAM \"{}\": pack {} not read", q.text, q.path);
                 continue;
             }
-            std::vector<u8> d(sarc.begin() + m.start, sarc.begin() + m.end);
-            const u32 id = static_cast<u32>(ZSTD_getDictID_fromDict(d.data(), d.size()));
-            dicts.emplace_back(id, std::move(d));
+            for (const auto& m : pe->ms) {
+                if (fnmatch(q.member.c_str(), m.name.c_str(), 0) != 0) {
+                    continue;
+                }
+                q.files++;
+                std::vector<u8> copy(pe->sarc.begin() + m.start, pe->sarc.begin() + m.end);
+                const int c = BymlEdit(copy, q, ewhy);
+                if (c < 0) {
+                    LOG_WARNING(Loader, "NX2_PARAM \"{}\" {}: {}; the member keeps its own values", q.text, m.name, ewhy);
+                    continue;
+                }
+                if (c > 0) {
+                    std::memcpy(pe->sarc.data() + m.start, copy.data(), copy.size());
+                    q.values += c;
+                    pe->changed = true;
+                }
+            }
+        } else {
+            const size_t sl = q.path.rfind('/');
+            const std::string dir_path = sl == std::string::npos ? "" : q.path.substr(0, sl);
+            const std::string glob = sl == std::string::npos ? q.path : q.path.substr(sl + 1);
+            const VirtualDir dir = dir_path.empty() ? romfs : romfs->GetDirectoryRelative(dir_path);
+            if (dir == nullptr) {
+                LOG_WARNING(Loader, "NX2_PARAM \"{}\": no folder {}", q.text, dir_path);
+                continue;
+            }
+            for (const auto& f : dir->GetFiles()) {
+                if (fnmatch(glob.c_str(), f->GetName().c_str(), 0) != 0) {
+                    continue;
+                }
+                const std::string p = dir_path.empty() ? f->GetName() : dir_path + "/" + f->GetName();
+                q.files++;
+                auto it = loose.find(p);
+                std::vector<u8> copy = it != loose.end() ? it->second : f->ReadAllBytes();
+                const int c = BymlEdit(copy, q, ewhy);
+                if (c < 0) {
+                    LOG_WARNING(Loader, "NX2_PARAM \"{}\" {}: {}; the file keeps its own values", q.text, p, ewhy);
+                    continue;
+                }
+                if (c > 0) {
+                    loose[p] = std::move(copy);
+                    q.values += c;
+                }
+            }
         }
+        LOG_INFO(Loader, "NX2_PARAM \"{}\": {} files matched, {} values edited", q.text, q.files, q.values);
     }
-    const auto src = ReadAll(pack_dir->GetFile("Foliage.pack.zs"));
-    if (src.empty()) {
-        why = "missing";
-        return fail("Pack/Foliage.pack.zs");
-    }
-    ZHead head;
-    if (!ZstdHead(src.data(), src.size(), head, why)) {
-        return fail("Pack/Foliage.pack.zs");
-    }
-    auto sarc = Decode(src, dicts, why);
-    if (sarc.empty()) {
-        return fail("Pack/Foliage.pack.zs");
-    }
-    std::vector<Member> ms;
-    if (!ParseSarc(sarc, ms, why)) {
-        return fail("Pack/Foliage.pack.zs");
-    }
-    static constexpr std::string_view prefix = "Foliage/ResFoliageScene/";
-    static constexpr std::string_view suffix = ".game__foliage__ResFoliageScene.bgyml";
-    int scenes = 0, edited = 0, values = 0, bad = 0;
-    for (const auto& m : ms) {
-        if (m.name.size() < prefix.size() + suffix.size() || m.name.rfind(prefix, 0) != 0 ||
-            m.name.compare(m.name.size() - suffix.size(), suffix.size(), suffix) != 0) {
+
+    // Packs written back as raw-block zstd frames with the source header, checked by decoding them again
+    int written = 0;
+    for (auto& [path, pe] : packs) {
+        if (!pe.ok || !pe.changed) {
             continue;
         }
-        scenes++;
-        std::vector<u8> copy(sarc.begin() + m.start, sarc.begin() + m.end);
-        std::string bwhy;
-        const int c = ClearBools(copy.data(), copy.size(), keys, bwhy);
-        if (c < 0) {
-            bad++;
-            LOG_WARNING(Loader, "NX2_DETAIL {}: {}; the scene keeps its own values", m.name, bwhy);
-            continue;
-        }
-        if (c > 0) {
-            std::memcpy(sarc.data() + m.start, copy.data(), copy.size());
-            edited++;
-            values += c;
-        }
-    }
-    if (values == 0) {
-        why = std::to_string(scenes) + " scene files, none has the layers asked for";
-        return fail("Pack/Foliage.pack.zs");
-    }
-    auto out = ZstdRaw(head, sarc);
-    if (out.empty()) {
-        why = "the edited pack does not fit the source frame's header";
-        return fail("Pack/Foliage.pack.zs");
-    }
-    {
+        auto out = ZstdRaw(pe.head, pe.sarc);
         std::string vwhy;
-        const auto back = Decode(out, dicts, vwhy);
-        if (back != sarc) {
-            why = "the written frame does not decode back to the edited pack (" + vwhy + ")";
-            return fail("Pack/Foliage.pack.zs");
+        if (out.empty() || Decode(out, dicts, vwhy) != pe.sarc) {
+            LOG_ERROR(Loader, "NX2_DETAIL {}: the written frame does not decode back ({}); the game keeps its own", path, vwhy);
+            continue;
         }
+        LOG_INFO(Loader, "NX2_DETAIL {} {} -> {} bytes (raw zstd blocks, dictionary {})", path, pe.src_size, out.size(),
+                 pe.head.dictid);
+        loose[path] = std::move(out);
     }
-    std::string list;
-    for (const auto& k : keys) {
-        list += (list.empty() ? "" : ",") + k;
+    for (auto& [path, bytes] : loose) {
+        Node* node = &tree;
+        const auto parts = Split(path, '/');
+        for (size_t i = 0; i + 1 < parts.size(); i++) {
+            node = &node->dirs[parts[i]];
+        }
+        node->files[parts.back()] = std::move(bytes);
+        written++;
     }
-    LOG_INFO(Loader,
-             "NX2_DETAIL Ocarina foliage layers off ({}): {} of {} scene files edited, {} values, {} skipped; "
-             "Pack/Foliage.pack.zs {} -> {} bytes (raw zstd blocks, dictionary {})",
-             list, edited, scenes, values, bad, src.size(), out.size(), head.dictid);
-    auto file = std::make_shared<VectorVfsFile>(std::move(out), "Foliage.pack.zs");
-    auto pack = std::make_shared<VectorVfsDirectory>(std::vector<VirtualFile>{file}, std::vector<VirtualDir>{}, "Pack");
-    return std::make_shared<VectorVfsDirectory>(std::vector<VirtualFile>{}, std::vector<VirtualDir>{pack}, "");
+    if (written == 0) {
+        LOG_WARNING(Loader, "NX2_DETAIL nothing edited; Ocarina keeps its own files");
+        return nullptr;
+    }
+    return MakeDir(tree, "");
 }
 
 } // namespace FileSys::Nx2OotDetail

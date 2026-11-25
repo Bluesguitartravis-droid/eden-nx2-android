@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """EDEN_NX2_OOT_DETAIL (read at each game boot from the switches file): Ocarina of Time with fewer
 ground layers (reduced: no moss or stones; lowest: also no small undergrowth; the grass stays).
+276: EDEN_NX2_OOT_PARAM edits any of the game's BYML parameter files, EDEN_NX2_OOT_LIST lists them.
 Adds src/core/file_sys/nx2_oot_detail.h (ported from Anka Native's detail.h, MIT) and a RomFS layer
 of its own in PatchManager::ApplyLayeredFS, under the player's own mods and over the game's files.
 The layer is built even when the game has no mod folder."""
@@ -35,12 +36,11 @@ sub('''    const auto load_dir = GetModificationLoadRoot();
     }
 ''', '''    const auto load_dir = GetModificationLoadRoot();
     const auto sdmc_load_dir = GetModificationLoadRoot(true);
-    const auto nx2_detail_keys = type == ContentRecordType::Program
-                                     ? Nx2OotDetail::WantedKeys(title_id)
-                                     : std::vector<std::string>{};
+    const auto nx2_detail = type == ContentRecordType::Program ? Nx2OotDetail::Wanted(title_id)
+                                                               : Nx2OotDetail::Request{};
     if ((type != ContentRecordType::Program && type != ContentRecordType::Data &&
          type != ContentRecordType::HtmlDocument) ||
-        (load_dir == nullptr && sdmc_load_dir == nullptr && nx2_detail_keys.empty())) {
+        (load_dir == nullptr && sdmc_load_dir == nullptr && !nx2_detail.Any())) {
         return;
     }
 ''')
@@ -55,11 +55,11 @@ sub('''    // When there are no layers to apply, return early as there is no nee
         return;
     }
 ''', '''    VirtualDir nx2_extracted;
-    if (!nx2_detail_keys.empty()) {
+    if (nx2_detail.Any()) {
         nx2_extracted = ExtractRomFS(romfs);
-        if (auto detail = Nx2OotDetail::BuildOverlay(nx2_extracted, nx2_detail_keys)) {
+        if (auto detail = Nx2OotDetail::BuildOverlay(nx2_extracted, nx2_detail)) {
             layers.emplace_back(std::move(detail));
-            mods.push_back("NX2 ground detail (EDEN_NX2_OOT_DETAIL)");
+            mods.push_back("NX2 game parameters (EDEN_NX2_OOT_DETAIL / EDEN_NX2_OOT_PARAM)");
         }
     }
 

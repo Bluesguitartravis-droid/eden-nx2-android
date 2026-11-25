@@ -98,9 +98,9 @@ jobs:
           # below the trigger #2465, ...).
           # Lichii renamed the Kotlin package to io.github.zortos293.lichii; the applicationId
           # (dev.eden.eden_emulator), so the app's data folder, is unchanged.
-          # 264: back on 8b84a70d. a7c672a8f3 (261-263) crashes loading Ocarina's ranch and on game
-          # relaunch (SIGABRT on RenderThread after unmapped buffer uploads); to bisect.
-          git -C upstream checkout 8b84a70d
+          # 271: a7c672a8f3 again. 261-268 lost the Vulkan device on Ocarina area loads on both bases;
+          # the cause was the barrier-free profiler clock (fenced again from 270), not the base.
+          git -C upstream checkout a7c672a8f3
           # godpow's ARM64 macro JIT (Djihads80/Eglantine PR #503, from an Odin 3), with the
           # split front using it; EDEN_NX2_MME_JIT=0 goes back to the interpreter.
           git -C upstream -c user.name=ci -c user.email=ci@localhost \
@@ -109,9 +109,7 @@ jobs:
           # pages the CPU rewrites every frame stay unprotected; EDEN_NX2_HOT_PAGES=0 at app start
           # turns it off) and per-thread GPU page translation cache (EDEN_NX2_NO_TRANSLATION_CACHE=1),
           # and the preflush of Ocarina's CPU-read GPU pages.
-          # 263: left out while 261-262 crash loading Ocarina's ranch (SIGABRT on RenderThread after
-          # unmapped buffer uploads); to see whether these patches or the base move cause it.
-          for p in ; do
+          for p in oot-hot-pages gpu-translation-cache oot-preflush-cpu-read; do
             git -C upstream -c user.name=ci -c user.email=ci@localhost \
               am --3way "$GITHUB_WORKSPACE/patches/$p.patch"
           done
@@ -119,7 +117,7 @@ jobs:
           # now: with them (131-136) Mario Kart World flashed blue and drew low-detail models.
           git -C upstream submodule update --init --recursive
           echo "NX2_COMMIT=$(git -C upstream rev-parse HEAD)" >> "$GITHUB_ENV"
-          echo "NX2_UPSTREAM=zortos293/Lichii:nx2@8b84a70+jit" >> "$GITHUB_ENV"
+          echo "NX2_UPSTREAM=zortos293/Lichii:nx2@a7c672a+jit+oot" >> "$GITHUB_ENV"
           git -C upstream log -1 --oneline
 
       - name: Install host build tools

@@ -9,8 +9,8 @@ cost ~10% of the GPU back thread").
 
 - WallClock::GetTimeNSRelaxed(): on ARM64 (HAS_NCE) a plain `mrs cntvct_el0` scaled to ns; elsewhere
   GetTimeNS().
-- Nx2Profile::Now()/Ticks() use it. EDEN_NX2_PROFILE_FENCED=1 (live, re-read every ~2 s) goes back to
-  the fenced read for comparison.
+- Nx2Profile::Now()/Ticks() use it only with EDEN_NX2_PROFILE_FENCED=0 (live while the profile is on).
+  From 270 the fenced read is the default again: 259-268 lost the Vulkan device on Ocarina area loads.
 - The GPU profile is off unless EDEN_NX2_PROFILE=1 (read at each game boot, in VideoCore::CreateGPU).
   Profiling was forced on in these test builds, and Maxwell3D turns its fast path (fast_maxwell3d: no
   per-method zones or virtual call, constant buffer words in one write, the front's state blocks) off
@@ -61,9 +61,10 @@ std::chrono::nanoseconds WallClock::GetTimeNSRelaxed() const {
 profile = src / "video_core/nx2_profile.h"
 replace(profile, """inline u64 Now() {
     return static_cast<u64>(Common::g_wall_clock.GetTimeNS().count());
-}""", """// NX2: the profiler reads the clock without barriers unless EDEN_NX2_PROFILE_FENCED=1
-// (scripts/apply-nx2-relaxed-profile-clock.py).
-inline std::atomic<bool> g_fenced_clock{false};
+}""", """// NX2: the barrier-free clock read is opt-in (EDEN_NX2_PROFILE_FENCED=0, re-read by Report while
+// the profile is on). Builds 259-268 used it by default and lost the Vulkan device on area loads in
+// Ocarina (garbage texture descriptors, unmapped buffer reads); fenced runs did not.
+inline std::atomic<bool> g_fenced_clock{true};
 
 inline u64 Now() {
     if (g_fenced_clock.load(std::memory_order_relaxed)) [[unlikely]] {
@@ -102,7 +103,7 @@ text = text.replace("""    {
         u64 checked = clock_checked.load(std::memory_order_relaxed);
         if (now - checked >= 2'000'000'000ULL &&
             clock_checked.compare_exchange_strong(checked, now)) {
-            g_fenced_clock.store(VideoCommon::Nx2LiveSwitch("EDEN_NX2_PROFILE_FENCED") == "1",
+            g_fenced_clock.store(VideoCommon::Nx2LiveSwitch("EDEN_NX2_PROFILE_FENCED") != "0",
                                  std::memory_order_relaxed);
         }
     }""")

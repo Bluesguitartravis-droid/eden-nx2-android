@@ -21,6 +21,7 @@
 //   key path: components separated by '.', each a glob over a dictionary's keys or an array index;
 //   edit: x<factor> (scale a number), =true, =false, =<number>. In place, sizes kept. A value the game's
 //   writer stores once for several paths changes for all of them.
+// EDEN_NX2_OOT_DUMP   (277) comma-separated file specs as in EDEN_NX2_OOT_PARAM: every value logged (NX2_DUMP).
 // EDEN_NX2_OOT_LIST   comma-separated substrings (case-insensitive): NX2_LIST log lines for the RomFS files and
 //   the members of the top-level Pack/*.pack.zs packs whose paths contain one; "packs" also lists every pack.
 #pragma once
@@ -475,17 +476,33 @@ inline std::vector<std::string> WantedList(u64 title_id) {
     return out;
 }
 
+// EDEN_NX2_OOT_DUMP: file specs separated by ',' (a RomFS path, its last component may be a glob, or
+// pack:<pack path>:<member glob>); every value of each matching BYML file is logged as NX2_DUMP lines.
+inline std::vector<std::string> WantedDump(u64 title_id) {
+    if (title_id != kOcarina) {
+        return {};
+    }
+    std::vector<std::string> out;
+    for (auto& s : Split(VideoCommon::Nx2LiveSwitch("EDEN_NX2_OOT_DUMP"), ',')) {
+        if (!s.empty()) {
+            out.push_back(std::move(s));
+        }
+    }
+    return out;
+}
+
 struct Request {
     std::vector<std::string> keys;
     std::vector<ParamRow> params;
     std::vector<std::string> list;
+    std::vector<std::string> dump;
     bool Any() const {
-        return !keys.empty() || !params.empty() || !list.empty();
+        return !keys.empty() || !params.empty() || !list.empty() || !dump.empty();
     }
 };
 
 inline Request Wanted(u64 title_id) {
-    return Request{WantedKeys(title_id), WantedParams(title_id), WantedList(title_id)};
+    return Request{WantedKeys(title_id), WantedParams(title_id), WantedList(title_id), WantedDump(title_id)};
 }
 
 // ---- BYML, generic edit ----
@@ -704,6 +721,130 @@ inline int BymlEdit(std::vector<u8>& file, const ParamRow& q, std::string& why) 
     return found;
 }
 
+
+// Every value of a BYML file as "<key path> = <value>" lines (at most max_lines)
+inline void BymlDumpNode(const Byml& y, u32 o, const std::string& path, int depth, std::vector<std::string>& out,
+                         size_t max_lines, u32 st, u32 nstr) {
+    if (out.size() >= max_lines || depth > 24 || y.n < 4 || o > y.n - 4) {
+        return;
+    }
+    const int t = y.b[o];
+    if (t != 0xC0 && t != 0xC1) {
+        return;
+    }
+    const u32 cnt = Rd(y.b, o + 1, 3, y.be);
+    const u64 vals = t == 0xC1 ? static_cast<u64>(o) + 4 : static_cast<u64>(o) + 4 + ((cnt + 3) & ~3U);
+    if (vals + (t == 0xC1 ? 8ULL : 4ULL) * cnt > y.n) {
+        out.push_back(path + " = <container past the file>");
+        return;
+    }
+    for (u32 i = 0; i < cnt && out.size() < max_lines; i++) {
+        std::string name;
+        int et;
+        size_t slot;
+        if (t == 0xC1) {
+            const size_t e = static_cast<size_t>(vals) + 8 * static_cast<size_t>(i);
+            const char* k = BymlKey(y, Rd(y.b, e, 3, y.be));
+            name = k != nullptr ? k : "?";
+            et = y.b[e + 3];
+            slot = e + 4;
+        } else {
+            name = std::to_string(i);
+            et = y.b[o + 4 + i];
+            slot = static_cast<size_t>(vals) + 4 * static_cast<size_t>(i);
+        }
+        const std::string p = path.empty() ? name : path + "." + name;
+        const u32 raw = Rd(y.b, slot, 4, y.be);
+        switch (et) {
+        case 0xC0:
+        case 0xC1:
+            BymlDumpNode(y, raw, p, depth + 1, out, max_lines, st, nstr);
+            break;
+        case 0xA0: {
+            std::string v = "?";
+            if (st != 0 && raw < nstr) {
+                const u64 so = static_cast<u64>(st) + Rd(y.b, st + 4 + 4 * raw, 4, y.be);
+                if (so < y.n && std::memchr(y.b + so, 0, y.n - static_cast<size_t>(so)) != nullptr) {
+                    v = reinterpret_cast<const char*>(y.b + so);
+                }
+            }
+            out.push_back(p + " = \"" + v + "\"");
+            break;
+        }
+        case 0xD0:
+            out.push_back(p + " = " + (raw ? "true" : "false"));
+            break;
+        case 0xD1:
+            out.push_back(p + " = " + std::to_string(static_cast<s32>(raw)) + " (int)");
+            break;
+        case 0xD3:
+            out.push_back(p + " = " + std::to_string(raw) + " (uint)");
+            break;
+        case 0xD2: {
+            float f;
+            std::memcpy(&f, &raw, 4);
+            out.push_back(p + " = " + std::to_string(f) + " (float)");
+            break;
+        }
+        case 0xD4:
+        case 0xD5:
+        case 0xD6: {
+            if (y.n < 8 || raw > y.n - 8) {
+                out.push_back(p + " = <64-bit past the file>");
+                break;
+            }
+            u64 v = 0;
+            for (int b = 0; b < 8; b++) {
+                v |= static_cast<u64>(y.b[raw + b]) << (8 * (y.be ? 7 - b : b));
+            }
+            if (et == 0xD6) {
+                double d;
+                std::memcpy(&d, &v, 8);
+                out.push_back(p + " = " + std::to_string(d) + " (double)");
+            } else {
+                out.push_back(p + " = " + std::to_string(et == 0xD4 ? static_cast<s64>(v) : static_cast<s64>(v)) +
+                              (et == 0xD4 ? " (int64)" : " (uint64)"));
+            }
+            break;
+        }
+        case 0xFF:
+            out.push_back(p + " = null");
+            break;
+        default:
+            out.push_back(p + " = <type " + std::to_string(et) + ">");
+            break;
+        }
+    }
+}
+
+inline void BymlDump(const std::string& name, std::vector<u8> file) {
+    Byml y;
+    std::string why;
+    if (!BymlOpen(y, file.data(), file.size(), why)) {
+        LOG_INFO(Loader, "NX2_DUMP {}: {}", name, why);
+        return;
+    }
+    u32 st = Rd(y.b, 8, 4, y.be), nstr = 0;
+    if (st != 0 && (st > y.n - 8 || y.b[st] != 0xC2)) {
+        st = 0;
+    }
+    if (st != 0) {
+        nstr = Rd(y.b, st + 1, 3, y.be);
+        if (static_cast<u64>(st) + 4 + 4ULL * (nstr + 1) > y.n) {
+            st = 0;
+            nstr = 0;
+        }
+    }
+    std::vector<std::string> out;
+    if (y.root != 0) {
+        BymlDumpNode(y, y.root, "", 0, out, 400, st, nstr);
+    }
+    LOG_INFO(Loader, "NX2_DUMP {} ({} bytes, {} values)", name, file.size(), out.size());
+    for (const auto& line : out) {
+        LOG_INFO(Loader, "NX2_DUMP   {}", line);
+    }
+}
+
 // ---- The overlay ----
 
 inline bool LoadDicts(const VirtualDir& romfs, std::vector<std::pair<u32, std::vector<u8>>>& dicts, std::string& why) {
@@ -832,7 +973,7 @@ inline VirtualDir BuildOverlay(const VirtualDir& romfs, Request req) {
     if (!req.list.empty()) {
         ListFiles(romfs, req.list);
     }
-    if (req.keys.empty() && req.params.empty()) {
+    if (req.keys.empty() && req.params.empty() && req.dump.empty()) {
         return nullptr;
     }
     std::string why;
@@ -870,6 +1011,47 @@ inline VirtualDir BuildOverlay(const VirtualDir& romfs, Request req) {
         pe.ok = true;
         return &pe;
     };
+
+    // The dumps (EDEN_NX2_OOT_DUMP), of the game's own files
+    for (const auto& spec : req.dump) {
+        if (spec.rfind("pack:", 0) == 0) {
+            const size_t c = spec.find(':', 5);
+            if (c == std::string::npos) {
+                LOG_WARNING(Loader, "NX2_DUMP {}: pack:<pack path>:<member glob>", spec);
+                continue;
+            }
+            const std::string pack = spec.substr(5, c - 5), glob = spec.substr(c + 1);
+            if (PackEdit* pe = get_pack(pack)) {
+                int n = 0;
+                for (const auto& m : pe->ms) {
+                    if (n < 20 && fnmatch(glob.c_str(), m.name.c_str(), 0) == 0) {
+                        BymlDump("pack:" + pack + ":" + m.name,
+                                 std::vector<u8>(pe->sarc.begin() + m.start, pe->sarc.begin() + m.end));
+                        n++;
+                    }
+                }
+                LOG_INFO(Loader, "NX2_DUMP {}: {} members dumped (at most 20)", spec, n);
+            }
+        } else {
+            const size_t sl = spec.rfind('/');
+            const std::string dir_path = sl == std::string::npos ? "" : spec.substr(0, sl);
+            const std::string glob = sl == std::string::npos ? spec : spec.substr(sl + 1);
+            const VirtualDir dir = dir_path.empty() ? romfs : romfs->GetDirectoryRelative(dir_path);
+            int n = 0;
+            if (dir != nullptr) {
+                for (const auto& f : dir->GetFiles()) {
+                    if (n < 20 && fnmatch(glob.c_str(), f->GetName().c_str(), 0) == 0) {
+                        BymlDump(dir_path + "/" + f->GetName(), f->ReadAllBytes());
+                        n++;
+                    }
+                }
+            }
+            LOG_INFO(Loader, "NX2_DUMP {}: {} files dumped (at most 20)", spec, n);
+        }
+    }
+    if (req.keys.empty() && req.params.empty()) {
+        return nullptr;
+    }
 
     // The foliage layers (EDEN_NX2_OOT_DETAIL)
     if (!req.keys.empty()) {

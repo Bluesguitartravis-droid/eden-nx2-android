@@ -109,7 +109,9 @@ jobs:
           # pages the CPU rewrites every frame stay unprotected; EDEN_NX2_HOT_PAGES=0 at app start
           # turns it off) and per-thread GPU page translation cache (EDEN_NX2_NO_TRANSLATION_CACHE=1),
           # and the preflush of Ocarina's CPU-read GPU pages.
-          for p in oot-hot-pages gpu-translation-cache oot-preflush-cpu-read; do
+          # 272: + Luke Evanson's zero-format TIC as the null texture (the format-0 assert before
+          # the device losses) and Frizti's collected guest writes (EDEN_NX2_GUEST_FAST=0 turns it off).
+          for p in oot-hot-pages gpu-translation-cache oot-preflush-cpu-read null-zero-format-tic guest-writes-collect; do
             git -C upstream -c user.name=ci -c user.email=ci@localhost \
               am --3way "$GITHUB_WORKSPACE/patches/$p.patch"
           done

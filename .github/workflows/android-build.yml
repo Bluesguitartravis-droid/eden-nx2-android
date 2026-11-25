@@ -572,6 +572,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-dlss-replacement-live.py upstream
 
+      - name: EDEN_NX2_OOT_DETAIL (Ocarina ground layers, from Anka Native, MIT)
+        shell: bash
+        run: python3 scripts/apply-nx2-oot-detail.py upstream
+
       - name: Detect Android build requirements
         id: android_req
         shell: bash

@@ -568,6 +568,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-clear-new-pass-live.py upstream
 
+      - name: EDEN_NX2_DLSS_REPLACEMENT read at each game boot
+        shell: bash
+        run: python3 scripts/apply-nx2-dlss-replacement-live.py upstream
+
       - name: Detect Android build requirements
         id: android_req
         shell: bash

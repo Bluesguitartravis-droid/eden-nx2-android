@@ -564,6 +564,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-relaxed-profile-clock.py upstream
 
+      - name: EDEN_NX2_CLEAR_NEW_PASS read every 10 s
+        shell: bash
+        run: python3 scripts/apply-nx2-clear-new-pass-live.py upstream
+
       - name: Detect Android build requirements
         id: android_req
         shell: bash

@@ -456,8 +456,17 @@ internal object Nx2Tools {
             "the native heap and Java heap totals. Takes about a second.",
             schema(JSONObject().put("top", prop("integer", "How many groups, default 25"))), true))
         .put(tool("last_exit", "How Eden's previous runs ended, as Android recorded it (low " +
-            "memory, crash, user closed it, ...), with memory use at the time.",
-            schema(JSONObject().put("count", prop("integer", "How many, default 3"))), true))
+            "memory, crash, user closed it, ...), with memory use at the time. tombstone=true adds, for " +
+            "the newest native crash, the readable text of Android's crash report (abort message, " +
+            "thread, backtrace).",
+            schema(JSONObject().put("count", prop("integer", "How many, default 3"))
+                .put("tombstone", prop("boolean", "Add the newest native crash report"))), true))
+        .put(tool("read_logcat", "Android's system log lines from Eden's own processes (what " +
+            "Android, the driver and libraries logged: abort messages, GPU faults, hwui), newest last. " +
+            "Survives an Eden crash until the log buffer wraps.",
+            schema(JSONObject()
+                .put("pattern", prop("string", "Regular expression lines must match (optional)"))
+                .put("max_lines", prop("integer", "Default 200, at most 2000"))), true))
         .put(tool("recent_frames", "The game frames Eden saved in the last half minute (one every " +
             "2.5 s, 480x270), newest first, with their age. For \"what just happened\".",
             schema(JSONObject().put("count", prop("integer", "How many, default 4, at most 12"))), true))
@@ -529,7 +538,10 @@ internal object Nx2Tools {
             }
             "watch" -> watch(context, args.optInt("seconds", 30).coerceIn(5, 50), args.optBoolean("screenshot", true))
             "memory_breakdown" -> text(memoryBreakdown(args.optInt("top", 25).coerceIn(5, 80)))
-            "last_exit" -> text(lastExit(context, args.optInt("count", 3).coerceIn(1, 10)))
+            "last_exit" -> text(lastExit(context, args.optInt("count", 3).coerceIn(1, 10)) +
+                if (args.optBoolean("tombstone", false)) "\n\n" + tombstone(context) else "")
+            "read_logcat" -> text(readLogcat(args.optString("pattern", ""),
+                args.optInt("max_lines", 200).coerceIn(1, 2000)))
             "recent_frames" -> recentFrames(args.optInt("count", 4).coerceIn(1, 12))
             "list_marks" -> text(listMarks(context))
             "install_build" -> text(Nx2Updater.install(context, args.optString("build", "latest")))
@@ -549,7 +561,7 @@ internal object Nx2Tools {
 
     /** Tools the Lab process (":nx2lab") answers by itself while Eden's own process is down:
      *  they only read or write files and settings, never the emulator. */
-    val OFFLINE = setOf("status", "read_log", "last_exit", "list_marks", "get_mark", "notebook_read",
+    val OFFLINE = setOf("status", "read_log", "last_exit", "read_logcat", "list_marks", "get_mark", "notebook_read",
         "notebook_append", "get_switches", "set_switches", "list_games", "list_files", "read_file",
         "install_build", "update_status")
 
@@ -1397,6 +1409,43 @@ internal object Nx2Tools {
                 (info.description?.let { "  ($it)" } ?: "")
         }
     }
+
+    /** The newest native crash's tombstone (protobuf) from ApplicationExitInfo, as its readable
+     *  strings: abort message, thread names, mapped files and function names. */
+    private fun tombstone(context: Context): String = runCatching {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return "Needs Android 12"
+        val manager = context.getSystemService(ActivityManager::class.java)
+        val info = manager.getHistoricalProcessExitReasons(context.packageName, 0, 16)
+            .firstOrNull { it.reason == android.app.ApplicationExitInfo.REASON_CRASH_NATIVE }
+            ?: return "No native crash on record"
+        val bytes = info.traceInputStream?.use { it.readBytes() } ?: return "No crash report kept for it"
+        val format = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
+        val strings = ArrayList<String>()
+        val run = StringBuilder()
+        for (b in bytes) {
+            val c = b.toInt() and 0xff
+            if (c in 0x20..0x7e) run.append(c.toChar()) else {
+                if (run.length >= 5) strings.add(run.toString())
+                run.setLength(0)
+            }
+        }
+        if (run.length >= 5) strings.add(run.toString())
+        // Keep the head (abort message, signal, thread) and function names; drop long path noise.
+        val kept = strings.filterIndexed { index, s -> index < 60 || !s.startsWith("/") }.take(400)
+        "Crash report of ${format.format(java.util.Date(info.timestamp))} (${bytes.size} bytes):\n" +
+            kept.joinToString("\n")
+    }.getOrElse { "Crash report not readable: ${it.javaClass.simpleName}: ${it.message}" }
+
+    /** logcat lines of Eden's own processes (an app may read its own UID's lines). */
+    private fun readLogcat(pattern: String, maxLines: Int): String = runCatching {
+        val process = ProcessBuilder("logcat", "-d", "-v", "time", "-t", "8000")
+            .redirectErrorStream(true).start()
+        val lines = process.inputStream.bufferedReader().readLines()
+        process.waitFor(5, TimeUnit.SECONDS)
+        val regex = if (pattern.isEmpty()) null else Regex(pattern, RegexOption.IGNORE_CASE)
+        val matched = if (regex == null) lines else lines.filter { regex.containsMatchIn(it) }
+        if (matched.isEmpty()) "(no matching lines in ${lines.size})" else matched.takeLast(maxLines).joinToString("\n")
+    }.getOrElse { "logcat failed: ${it.javaClass.simpleName}: ${it.message}" }
 
     // ---- recent frames and marks ------------------------------------------------------------
 

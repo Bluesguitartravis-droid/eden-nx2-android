@@ -584,6 +584,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-list-indirect-any-limit.py upstream
 
+      - name: Kept GPU-written lists counted by kind (with the list indirect log)
+        shell: bash
+        run: python3 scripts/apply-nx2-list-notcall-stats.py upstream
+
       - name: Detect Android build requirements
         id: android_req
         shell: bash

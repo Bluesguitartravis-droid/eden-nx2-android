@@ -80,7 +80,7 @@ jobs:
     permissions:
       contents: write
     runs-on: ubuntu-latest
-    timeout-minutes: 150
+    timeout-minutes: 90
 
     steps:
       - name: Checkout build harness
@@ -592,10 +592,6 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-list-draw-back.py upstream
 
-      - name: Android build tuning (ThinLTO, -O3, ARMv8.2)
-        shell: bash
-        run: python3 scripts/apply-android-lto.py upstream
-
       - name: Mesh emulation line-major output, per-pipeline stats and live skip
         shell: bash
         run: python3 scripts/apply-nx2-mesh-layout.py upstream
@@ -607,6 +603,10 @@ jobs:
       - name: Mesh packing eligibility log
         shell: bash
         run: python3 scripts/apply-nx2-mesh-pack-check.py upstream
+
+      - name: Mesh emulation packs two mesh workgroups per compute workgroup
+        shell: bash
+        run: python3 scripts/apply-nx2-mesh-pack.py upstream
 
       - name: Detect Android build requirements
         id: android_req

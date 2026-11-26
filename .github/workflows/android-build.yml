@@ -588,6 +588,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-list-notcall-stats.py upstream
 
+      - name: Apply NX2 list draw on the back and trusted ring pages (switches)
+        shell: bash
+        run: python3 scripts/apply-nx2-list-draw-back.py upstream
+
       - name: Detect Android build requirements
         id: android_req
         shell: bash

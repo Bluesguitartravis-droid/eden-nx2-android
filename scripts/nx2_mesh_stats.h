@@ -19,6 +19,7 @@
 #include "common/common_types.h"
 #include "common/logging.h"
 #include "video_core/nx2_live_switch.h"
+#include "video_core/nx2_foliage_addons.h"
 
 // Emulated mesh draws by pipeline (scripts/apply-nx2-mesh-layout.py), to find which of a game's
 // task/mesh programs (grass, leaves, ...) costs the most, and to switch them off one at a time.
@@ -56,6 +57,10 @@ struct State {
     bool stats{};
     bool skip_all{};
     std::vector<u64> skip;
+    /// The running game's foliage Add-Ons (nx2_foliage_addons.h), read once per program.
+    u64 addon_program{~u64{0}};
+    bool addon_all{};
+    bool addon_performance{};
 };
 
 inline State& Get() {
@@ -72,10 +77,30 @@ inline void Refresh(State& state, std::chrono::steady_clock::time_point now) {
         return;
     }
     state.last_check = now;
+    if (const u64 program = Settings::GetCurrentProgramID(); program != state.addon_program) {
+        state.addon_program = program;
+        state.addon_all = program == Nx2FoliageAddons::kOcarina &&
+                          Nx2FoliageAddons::Enabled(program, Nx2FoliageAddons::kNone);
+        state.addon_performance = program == Nx2FoliageAddons::kOcarina &&
+                                  Nx2FoliageAddons::Enabled(program, Nx2FoliageAddons::kPerformance);
+        if (state.addon_all || state.addon_performance) {
+            LOG_INFO(Render_Vulkan, "Mesh draws: Add-Ons \"{}\" checked",
+                     state.addon_all ? Nx2FoliageAddons::kNone : Nx2FoliageAddons::kPerformance);
+        }
+    }
     state.stats = VideoCommon::Nx2LiveSwitch("EDEN_NX2_MESH_STATS") == "1";
     const std::string list = VideoCommon::Nx2LiveSwitch("EDEN_NX2_SKIP_MESH");
     state.skip.clear();
     state.skip_all = list == "all" || list == "1";
+    if (list.empty()) {
+        // No EDEN_NX2_SKIP_MESH: the foliage Add-Ons decide.
+        state.skip_all = state.addon_all;
+        if (!state.addon_all && state.addon_performance) {
+            state.skip.assign(Nx2FoliageAddons::kPerformanceHashes.begin(),
+                              Nx2FoliageAddons::kPerformanceHashes.end());
+        }
+        return;
+    }
     if (state.skip_all) {
         return;
     }

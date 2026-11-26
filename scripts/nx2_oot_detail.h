@@ -46,6 +46,7 @@
 #include "core/file_sys/vfs/vfs.h"
 #include "core/file_sys/vfs/vfs_vector.h"
 #include "video_core/nx2_live_switch.h"
+#include "video_core/nx2_foliage_addons.h"
 
 namespace FileSys::Nx2OotDetail {
 
@@ -55,7 +56,11 @@ inline std::vector<std::string> WantedKeys(u64 title_id) {
     if (title_id != kOcarina) {
         return {};
     }
-    const std::string v = VideoCommon::Nx2LiveSwitch("EDEN_NX2_OOT_DETAIL");
+    std::string v = VideoCommon::Nx2LiveSwitch("EDEN_NX2_OOT_DETAIL");
+    if (v.empty() && Nx2FoliageAddons::Enabled(title_id, Nx2FoliageAddons::kLighter)) {
+        LOG_INFO(Loader, "NX2_DETAIL: {} is checked in Add-Ons", Nx2FoliageAddons::kLighter);
+        v = "lowest";
+    }
     if (v.empty() || v == "full" || v == "0") {
         return {};
     }

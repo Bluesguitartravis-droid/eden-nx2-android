@@ -166,9 +166,10 @@ patch("video_core/renderer_vulkan/vk_rasterizer.cpp", [
                        : emulated_mesh ? "indirect emulated mesh draw"
                                        : "no VK_EXT_mesh_shader");''',
      '''    const bool emulated_mesh{mesh_draw && pipeline->IsEmulatedMesh()};
-    // EDEN_NX2_MESH_STATS / EDEN_NX2_SKIP_MESH (live, nx2_mesh_stats.h).
+    // EDEN_NX2_MESH_STATS / EDEN_NX2_SKIP_MESH (live) and the foliage Add-Ons (nx2_mesh_stats.h),
+    // for emulated and native mesh draws alike.
     bool skip_listed{};
-    if (emulated_mesh) {
+    if (mesh_draw) {
         const MeshEmulationSetup* const setup{pipeline->MeshEmulation()};
         VideoCommon::Nx2MeshStats::Shape shape{};
         if (setup != nullptr) {

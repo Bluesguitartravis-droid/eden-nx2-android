@@ -596,6 +596,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-android-lto.py upstream
 
+      - name: Mesh emulation line-major output, per-pipeline stats and live skip
+        shell: bash
+        run: python3 scripts/apply-nx2-mesh-layout.py upstream
+
       - name: Detect Android build requirements
         id: android_req
         shell: bash

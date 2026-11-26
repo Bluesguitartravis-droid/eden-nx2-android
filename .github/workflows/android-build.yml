@@ -80,7 +80,7 @@ jobs:
     permissions:
       contents: write
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 150
 
     steps:
       - name: Checkout build harness
@@ -591,6 +591,10 @@ jobs:
       - name: Apply NX2 list draw on the back and trusted ring pages (switches)
         shell: bash
         run: python3 scripts/apply-nx2-list-draw-back.py upstream
+
+      - name: Android build tuning (ThinLTO, -O3, ARMv8.2)
+        shell: bash
+        run: python3 scripts/apply-android-lto.py upstream
 
       - name: Detect Android build requirements
         id: android_req

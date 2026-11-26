@@ -580,6 +580,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-tex-lod-bias.py upstream
 
+      - name: EDEN_NX2_LIST_INDIRECT_ANY_LIMIT (GPU-written dispatch sizes on the Adreno's grid limits, live)
+        shell: bash
+        run: python3 scripts/apply-nx2-list-indirect-any-limit.py upstream
+
       - name: Detect Android build requirements
         id: android_req
         shell: bash

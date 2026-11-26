@@ -604,6 +604,10 @@ jobs:
         shell: bash
         run: python3 scripts/apply-nx2-foliage-addons.py upstream
 
+      - name: Mesh packing eligibility log
+        shell: bash
+        run: python3 scripts/apply-nx2-mesh-pack-check.py upstream
+
       - name: Detect Android build requirements
         id: android_req
         shell: bash

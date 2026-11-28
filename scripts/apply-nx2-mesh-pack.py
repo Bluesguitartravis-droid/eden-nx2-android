@@ -15,8 +15,8 @@ index instead (the draw's group count is the output buffer's length over the blo
 the same program on the same input and writes the same words as the first half. Hence no memory
 writes allowed in the program.
 
-The host dispatches ceil(groups / 2) workgroups. EDEN_NX2_MESH_PACK=0 (read at app start) keeps
-one mesh workgroup per Vulkan workgroup. The pipeline build logs "Mesh pack: N of M emulated mesh
+The host dispatches ceil(groups / 2) workgroups. Off by default since build 287 (no gain measured);
+EDEN_NX2_MESH_PACK=1 (read at app start) turns it on. The pipeline build logs "Mesh pack: N of M emulated mesh
 programs packed" every 16 programs.
 """
 from pathlib import Path
@@ -266,8 +266,9 @@ patch(cache, '''        // Mesh packing check (scripts/apply-nx2-mesh-pack-check
         // barriers, epilogue and returns are all at the top level.
         {
             static const bool pack_enabled{[] {
+                // Off by default since 287: no host GPU time saved at the field (Nov 27).
                 const char* const value{std::getenv("EDEN_NX2_MESH_PACK")};
-                return value == nullptr || std::string_view{value} != "0";
+                return value != nullptr && std::string_view{value} == "1";
             }()};
             bool packable{pack_enabled && !has_task && mesh.workgroup_size[0] == 32 &&
                           mesh.workgroup_size[1] == 1 && mesh.workgroup_size[2] == 1 &&
@@ -324,7 +325,7 @@ patch(cache, '''        // Mesh packing check (scripts/apply-nx2-mesh-pack-check
             if (total % 16 == 0) {
                 LOG_INFO(Render_Vulkan,
                          "Mesh pack: {} of {} emulated mesh programs packed two workgroups to "
-                         "one (EDEN_NX2_MESH_PACK=0 turns it off)",
+                         "one (EDEN_NX2_MESH_PACK=1 turns it on)",
                          packed, total);
             }
         }

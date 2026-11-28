@@ -315,10 +315,28 @@ object Nx2FlightRecorder {
         }
     }
 
+    /** Lines of /proc/self/status in KiB (VmRSS, RssAnon, ...). Cheap: unlike
+     * Debug.getMemoryInfo (PSS), it does not walk the process's memory maps. That walk took
+     * ~100-140 ms with Eden's ~11 GB and 21,000 mappings and held the mm lock meanwhile, so every
+     * sample stalled the GPU threads' buffer mappings: a ~110 ms hitch every 10 s (Nov 28). */
+    fun procStatusKib(): Map<String, Long> {
+        val out = HashMap<String, Long>()
+        runCatching {
+            File("/proc/self/status").forEachLine { line ->
+                val colon = line.indexOf(':')
+                if (colon > 0 && line.endsWith(" kB")) {
+                    line.substring(colon + 1, line.length - 3).trim().toLongOrNull()?.let {
+                        out[line.substring(0, colon)] = it
+                    }
+                }
+            }
+        }
+        return out
+    }
+
     private fun sampleMemory(context: Context) {
         if (currentSession == null) return
-        val memory = Debug.MemoryInfo()
-        Debug.getMemoryInfo(memory)
+        val status = procStatusKib()
         val manager = context.getSystemService(ActivityManager::class.java)
         val system = ActivityManager.MemoryInfo()
         manager.getMemoryInfo(system)
@@ -326,8 +344,8 @@ object Nx2FlightRecorder {
             context.getSystemService(PowerManager::class.java)?.currentThermalStatus ?: -1
         } else -1
         val values = JSONObject()
-            .put("pss_kib", memory.totalPss)
-            .put("private_dirty_kib", memory.totalPrivateDirty)
+            .put("rss_kib", status["VmRSS"] ?: -1L)
+            .put("rss_anon_kib", status["RssAnon"] ?: -1L)
             .put("system_available_mib", system.availMem / 1048576)
             .put("system_low_memory", system.lowMemory)
             .put("java_heap_used_mib",
@@ -348,7 +366,7 @@ object Nx2FlightRecorder {
         runCatching {
             io.github.zortos293.lichii.utils.Log.info("[NX2_THERMAL] status=" + thermal +
                 " headroom10s=" + String.format(java.util.Locale.US, "%.2f", headroom) +
-                " pss_mib=" + memory.totalPss / 1024 +
+                " rss_mib=" + (status["VmRSS"] ?: -1024L) / 1024 +
                 " avail_mib=" + system.availMem / 1048576)
         }
     }

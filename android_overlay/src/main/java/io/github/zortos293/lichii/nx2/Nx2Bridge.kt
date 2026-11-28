@@ -738,13 +738,14 @@ internal object Nx2Tools {
 
     private fun performance(context: Context, seconds: Int): String {
         val out = StringBuilder()
-        val memory = Debug.MemoryInfo()
-        Debug.getMemoryInfo(memory)
+        // VmRSS from /proc/self/status: PSS (Debug.getMemoryInfo) walks every mapping and stalls
+        // the game for ~100+ ms (see Nx2FlightRecorder.procStatusKib).
+        val status = io.github.zortos293.lichii.utils.Nx2FlightRecorder.procStatusKib()
         val manager = context.getSystemService(ActivityManager::class.java)
         val system = ActivityManager.MemoryInfo()
         manager.getMemoryInfo(system)
         val power = context.getSystemService(PowerManager::class.java)
-        out.append("app_pss_mib=").append(memory.totalPss / 1024)
+        out.append("app_rss_mib=").append((status["VmRSS"] ?: -1024L) / 1024)
             .append(" system_available_mib=").append(system.availMem / 1048576)
             .append(" system_low_memory=").append(system.lowMemory).append('\n')
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -1186,8 +1187,8 @@ internal object Nx2Tools {
         else summary.append(String.format(Locale.US, "fps median %.1f, lowest %.1f; worst frame %d ms; ",
             sorted[sorted.size / 2], sorted.first(), worstMs))
         summary.append("shaders building in $shaderSeconds s; no frames in $silent s.\n")
-        val memory = Debug.MemoryInfo().also { Debug.getMemoryInfo(it) }
-        summary.append("memory ${memory.totalPss / 1024} MiB")
+        val rssKib = io.github.zortos293.lichii.utils.Nx2FlightRecorder.procStatusKib()["VmRSS"] ?: -1024L
+        summary.append("memory (RSS) ${rssKib / 1024} MiB")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             summary.append(", thermal status ")
                 .append(context.getSystemService(PowerManager::class.java)?.currentThermalStatus ?: -1)
